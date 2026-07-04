@@ -10,10 +10,18 @@ from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import Bool
 from od_msg.action import OrganizeObjects
 
+from . import robot_motion
+
 class RobotArmNode(Node):
     # robot_arm_node를 초기화하고 정리 실행 action server와 emergency_stop 구독자를 준비하는 함수
     def __init__(self):
         super().__init__('robot_arm_node')
+
+        try:
+            robot_motion.connect()
+            self.get_logger().info('robot_motion connected.')
+        except Exception as e:
+            self.get_logger().error(f'robot_motion 연결 실패: {e}')
 
         self.callback_group = ReentrantCallbackGroup()
         self.emergency_stop_qos = QoSProfile(
@@ -84,6 +92,7 @@ class RobotArmNode(Node):
 
         else:
             self.emergency_stop_requested = False
+            robot_motion.clear_stop()
             self.get_logger().info('Emergency stop cleared.')
 
     # task_manager_node가 보낸 정리 대상 목록을 받아 순서대로 정리 작업을 수행하는 action 실행 함수
@@ -224,24 +233,48 @@ class RobotArmNode(Node):
             f'Feedback: {status} {current_index}/{total_count} - {current_object}'
         )
 
-    # 오배치 물체 하나를 실제로 집어서 정상 위치로 옮기는 함수
+    # # 오배치 물체 하나를 실제로 집어서 정상 위치로 옮기는 함수
+    # def organize_single_object(self, misplaced_object):
+    #     object_name = misplaced_object.get('name', 'unknown_object')
+
+    #     self.get_logger().info(f'정리 작업 시작: {object_name}')
+
+    #     # TODO:
+    #     # 1. misplaced_object["position"]을 robot base 좌표계로 변환
+    #     # 2. 로봇팔을 pick pose로 이동
+    #     # 3. gripper close
+    #     # 4. expected_zone 또는 target pose로 이동
+    #     # 5. gripper open
+    #     # 6. safe pose로 복귀
+    #     #
+    #     # 지금은 실제 로봇 제어 API가 연결되지 않았으므로 성공 처리하지 않습니다.
+    #     raise NotImplementedError(
+    #         'organize_single_object 내부에 실제 로봇 제어 코드를 연결해야 합니다.'
+    #     )
+
+    # 오배치 물체 하나에 대해 테스트용 로봇 보조 동작을 수행하는 함수
     def organize_single_object(self, misplaced_object):
         object_name = misplaced_object.get('name', 'unknown_object')
 
-        self.get_logger().info(f'정리 작업 시작: {object_name}')
+        self.get_logger().info(f'테스트 정리 동작 시작: {object_name}')
 
-        # TODO:
-        # 1. misplaced_object["position"]을 robot base 좌표계로 변환
-        # 2. 로봇팔을 pick pose로 이동
-        # 3. gripper close
-        # 4. expected_zone 또는 target pose로 이동
-        # 5. gripper open
-        # 6. safe pose로 복귀
-        #
-        # 지금은 실제 로봇 제어 API가 연결되지 않았으므로 성공 처리하지 않습니다.
-        raise NotImplementedError(
-            'organize_single_object 내부에 실제 로봇 제어 코드를 연결해야 합니다.'
+        if self.emergency_stop_requested:
+            raise RuntimeError('emergency stop requested before robot motion')
+
+        robot_motion.clear_stop()
+
+        success = robot_motion.test_small_assist_motion(object_name)
+
+        if not success:
+            raise RuntimeError('test motion failed or stopped')
+
+        self.get_logger().info(
+            f'{object_name} 테스트 동작 완료. 사용자가 물체를 손으로 치우는 단계입니다.'
         )
+
+        return True
+
+
 
     # action result에 넣을 JSON 문자열을 만드는 함수
     def make_result_json(self, completed_objects, failed_objects, status: str):
@@ -263,19 +296,10 @@ class RobotArmNode(Node):
     def safe_stop_robot(self):
         self.get_logger().warn('safe_stop_robot called.')
 
-        # TODO:
-        # 실제 로봇 API 연결 후 여기에 정지 코드를 넣습니다.
-        #
-        # 예시 방향:
-        # 1. 현재 motion 정지
-        # 2. force control 사용 중이면 release_force 또는 release_compliance_ctrl
-        # 3. gripper 동작 중이면 안전 상태 처리
-        # 4. 필요하면 safe pose 복귀는 stop이 아니라 별도 recovery에서 수행
-        #
-        # 주의:
-        # stop은 로봇 동작을 즉시 멈추는 의미입니다.
-        # shutdown처럼 노드를 종료하면 안 됩니다.
-        pass
+        try:
+            robot_motion.safe_stop()
+        except Exception as e:
+            self.get_logger().error(f'safe_stop_robot 처리 중 오류 발생: {e}')
 
 
 # ROS2 robot_arm_node를 실행하고 action/service/subscriber callback을 병렬 처리하는 메인 함수

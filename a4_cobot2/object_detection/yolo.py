@@ -25,6 +25,7 @@ class YoloModel:
         self.model = YOLO(YOLO_MODEL_PATH)
         with open(YOLO_JSON_PATH, "r", encoding="utf-8") as file:
             class_dict = json.load(file)
+            self.class_id_to_name = {int(k): v for k, v in class_dict.items()}
             self.reversed_class_dict = {v: int(k) for k, v in class_dict.items()}
 
     def get_frames(self, img_node, duration=1.0):
@@ -70,6 +71,60 @@ class YoloModel:
             return None, None
         best_det = max(matches, key=lambda x: x["score"])
         return best_det["box"], best_det["score"]
+
+    def get_all_detections(self, img_node, target_names=None):
+        """
+        현재 카메라 프레임에서 탐지된 모든 물체를 반환한다.
+
+        반환 형식:
+        [
+            {
+                "name": "hammer",
+                "class_id": 1,
+                "box": [x1, y1, x2, y2],
+                "confidence": 0.89
+            }
+        ]
+        """
+        rclpy.spin_once(img_node)
+        frames = self.get_frames(img_node)
+
+        if not frames:
+            print("No frames available for detection.")
+            return []
+
+        target_ids = None
+        if target_names:
+            target_ids = set()
+            for name in target_names:
+                if name in self.reversed_class_dict:
+                    target_ids.add(self.reversed_class_dict[name])
+                else:
+                    print(f"Unknown target class ignored: {name}")
+
+        results = self.model(frames, verbose=False)
+        detections = self._aggregate_detections(results)
+
+        converted = []
+        for det in detections:
+            class_id = int(det["label"])
+
+            if target_ids is not None and class_id not in target_ids:
+                continue
+
+            name = self.class_id_to_name.get(class_id, f"unknown_{class_id}")
+
+            converted.append(
+                {
+                    "name": name,
+                    "class_id": class_id,
+                    "box": det["box"],
+                    "confidence": float(det["score"]),
+                }
+            )
+
+        converted.sort(key=lambda x: x["confidence"], reverse=True)
+        return converted
 
     def _aggregate_detections(self, results, confidence_threshold=0.5, iou_threshold=0.5):
         """

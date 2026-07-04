@@ -1,0 +1,5 @@
+string target_names_json
+---
+bool success
+string detected_objects_json
+string message
