@@ -1,0 +1,5 @@
+string detected_objects_json
+---
+bool success
+string judgement_json
+string message

@@ -1,0 +1,49 @@
+# 나중에 버전이 제대로 적혀있는지 체크 필요
+
+# requirements_detailed.txt
+# Python/pip dependencies for a4_cobot2
+# Target environment: Ubuntu 22.04 + ROS2 Humble + Python 3.10
+#
+# Do NOT install ROS2 packages with pip.
+# Install rclpy, std_msgs, sensor_msgs, cv_bridge, and other ROS packages through apt/rosdep.
+
+# =========================
+# OpenAI / LLM / environment
+# =========================
+python-dotenv>=1.0.0
+openai>=1.0.0
+langchain>=0.2.0
+langchain-openai>=0.1.0
+
+# =========================
+# Audio input / STT / wakeword
+# =========================
+numpy>=1.23.0
+scipy>=1.10.0
+sounddevice>=0.4.6
+PyAudio>=0.2.14
+openwakeword>=0.6.0
+
+# =========================
+# Object detection
+# =========================
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+
+# =========================
+# Notes for Ubuntu 22.04
+# =========================
+# PyAudio may require:
+#   sudo apt install portaudio19-dev python3-pyaudio
+#
+# sounddevice may require:
+#   sudo apt install libportaudio2
+#
+# TTS in voice/tts.py and notification/status_notifier_node.py uses spd-say if available:
+#   sudo apt install speech-dispatcher
+#
+# RealSense / ROS image conversion are not pip dependencies:
+#   sudo apt install ros-humble-cv-bridge ros-humble-sensor-msgs
+#
+# RealSense ROS2 package is also installed separately, for example:
+#   sudo apt install ros-humble-realsense2-camera

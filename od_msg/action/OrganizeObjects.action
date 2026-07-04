@@ -1,0 +1,10 @@
+string organize_objects_json
+---
+bool success
+string result_json
+string message
+---
+string current_object
+int32 current_index
+int32 total_count
+string status
