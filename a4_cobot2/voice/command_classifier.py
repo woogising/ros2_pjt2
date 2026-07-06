@@ -1,3 +1,13 @@
+# ============================================================
+# voice/command_classifier.py
+# 역할:
+#   - STT가 변환한 자연어 문장을 내부 명령어로 분류합니다.
+# 입력 예:
+#   - "작업공간 확인해줘" -> check_workspace
+#   - "정리 시작해줘" -> start_organize
+# 출력:
+#   - task_manager_node가 이해하는 명령 문자열 하나
+# ============================================================
 import os
 
 from dotenv import load_dotenv

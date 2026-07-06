@@ -1,3 +1,14 @@
+# ============================================================
+# robot_arm/robot_arm_node.py
+# 역할:
+#   - task_manager_node가 보내는 /organize_objects action goal을 받아
+#     오배치 물체 목록을 순서대로 정리하는 로봇팔 실행 노드입니다.
+# 현재 상태:
+#   - pick/place 좌표를 받는 구조는 완성되어 있습니다.
+#   - 실제 pick_and_place 대신 robot_motion.test_small_assist_motion()으로 연결되어 있습니다.
+# 안전 관련:
+#   - /emergency_stop을 구독하고, True가 오면 safe_stop_robot()을 호출합니다.
+# ============================================================
 import json
 import rclpy
 
@@ -17,10 +28,16 @@ class RobotArmNode(Node):
     def __init__(self):
         super().__init__('robot_arm_node')
 
+        # robot_motion_connected:
+        #   DSR_ROBOT2 API 연결 성공 여부입니다.
+        #   False이면 실제 로봇 제어가 불가능하므로 organize action goal을 거절합니다.
+        self.robot_motion_connected = False
         try:
             robot_motion.connect()
+            self.robot_motion_connected = True
             self.get_logger().info('robot_motion connected.')
         except Exception as e:
+            self.robot_motion_connected = False
             self.get_logger().error(f'robot_motion 연결 실패: {e}')
 
         self.callback_group = ReentrantCallbackGroup()
@@ -55,6 +72,9 @@ class RobotArmNode(Node):
             callback_group=self.callback_group
         )
 
+        # emergency_stop_requested:
+        #   /emergency_stop topic의 최신 상태입니다.
+        #   True이면 새 action goal을 거절하고, 진행 중인 작업도 중단합니다.
         self.emergency_stop_requested = False
 
         self.get_logger().info('RobotArmNode started.')
@@ -63,6 +83,10 @@ class RobotArmNode(Node):
     # 새 정리 작업 goal을 받을지 판단하는 함수
     def handle_goal(self, goal_request):
         self.get_logger().info('Received organize_objects goal.')
+
+        if not self.robot_motion_connected:
+            self.get_logger().warn('robot_motion이 연결되지 않아 goal을 거절합니다.')
+            return GoalResponse.REJECT
 
         if self.emergency_stop_requested:
             self.get_logger().warn('Emergency stop 상태라 goal을 거절합니다.')
@@ -91,6 +115,8 @@ class RobotArmNode(Node):
             self.safe_stop_robot()
 
         else:
+            # /emergency_stop False를 받으면 robot_arm_node의 stop 플래그를 해제합니다.
+            # 실제 clear 명령은 safety_node가 /safety_command='clear'를 받은 뒤 발행하는 흐름에서 들어옵니다.
             self.emergency_stop_requested = False
             robot_motion.clear_stop()
             self.get_logger().info('Emergency stop cleared.')
@@ -233,43 +259,57 @@ class RobotArmNode(Node):
             f'Feedback: {status} {current_index}/{total_count} - {current_object}'
         )
 
-    # # 오배치 물체 하나를 실제로 집어서 정상 위치로 옮기는 함수
-    # def organize_single_object(self, misplaced_object):
-    #     object_name = misplaced_object.get('name', 'unknown_object')
-
-    #     self.get_logger().info(f'정리 작업 시작: {object_name}')
-
-    #     # TODO:
-    #     # 1. misplaced_object["position"]을 robot base 좌표계로 변환
-    #     # 2. 로봇팔을 pick pose로 이동
-    #     # 3. gripper close
-    #     # 4. expected_zone 또는 target pose로 이동
-    #     # 5. gripper open
-    #     # 6. safe pose로 복귀
-    #     #
-    #     # 지금은 실제 로봇 제어 API가 연결되지 않았으므로 성공 처리하지 않습니다.
-    #     raise NotImplementedError(
-    #         'organize_single_object 내부에 실제 로봇 제어 코드를 연결해야 합니다.'
-    #     )
-
-    # 오배치 물체 하나에 대해 테스트용 로봇 보조 동작을 수행하는 함수
+    # 오배치 물체 하나를 집어서 원래 있어야 하는 구역 대표 위치로 옮기는 함수
     def organize_single_object(self, misplaced_object):
+        # misplaced_object는 workspace_judge_utils.make_misplaced_object()가 만든 dict입니다.
+        # name: 물체 클래스 이름
+        # pick_position: 현재 물체 위치. 현재는 camera frame 기준입니다.
+        # place_position: 원래 있어야 하는 zone의 대표 위치. 현재는 camera frame 기준입니다.
+        # place_frame: 위 좌표들이 어떤 frame 기준인지 나타냅니다.
+        # expected_zone: 물체가 이동해야 하는 zone 이름입니다.
         object_name = misplaced_object.get('name', 'unknown_object')
+        pick_position = misplaced_object.get('pick_position')
+        place_position = misplaced_object.get('place_position')
+        place_frame = misplaced_object.get('place_frame', 'unknown_frame')
+        expected_zone = misplaced_object.get('expected_zone', 'unknown_zone')
 
-        self.get_logger().info(f'테스트 정리 동작 시작: {object_name}')
+        self.get_logger().info(f'정리 작업 시작: {object_name}')
+        self.get_logger().info(f'pick_position: {pick_position}')
+        self.get_logger().info(f'place_position: {place_position}')
+        self.get_logger().info(f'expected_zone: {expected_zone}, frame: {place_frame}')
 
         if self.emergency_stop_requested:
             raise RuntimeError('emergency stop requested before robot motion')
 
+        if pick_position is None:
+            raise RuntimeError(f'{object_name}의 pick_position이 없습니다.')
+
+        if place_position is None:
+            raise RuntimeError(f'{object_name}의 place_position이 없습니다.')
+
         robot_motion.clear_stop()
 
+        # TODO:
+        # 1. pick_position은 현재 camera frame 기준입니다.
+        # 2. 실제 로봇 제어 전에 camera frame 좌표를 robot base frame 좌표로 변환해야 합니다.
+        # 3. 변환된 pick pose와 place pose를 robot_motion.pick_and_place_object() 같은 함수에 넘기면 됩니다.
+        #
+        # 예시:
+        # success = robot_motion.pick_and_place_object(
+        #     object_name=object_name,
+        #     pick_position_camera=pick_position,
+        #     place_position_camera=place_position,
+        #     frame=place_frame,
+        # )
+
+        # 현재 robot_motion.py에 실제 pick_and_place 함수가 없다면 테스트 동작만 수행합니다.
         success = robot_motion.test_small_assist_motion(object_name)
 
         if not success:
             raise RuntimeError('test motion failed or stopped')
 
         self.get_logger().info(
-            f'{object_name} 테스트 동작 완료. 사용자가 물체를 손으로 치우는 단계입니다.'
+            f'{object_name} 정리 테스트 완료. 실제 pick/place 함수 연결 전 좌표 전달 구조를 확인했습니다.'
         )
 
         return True
@@ -319,6 +359,7 @@ def main(args=None):
 
     finally:
         executor.shutdown()
+        robot_motion.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 

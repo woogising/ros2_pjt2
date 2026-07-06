@@ -1,3 +1,12 @@
+# ============================================================
+# object_detection/detection_utils.py
+# 역할:
+#   - /scan_workspace에서 쓰는 JSON 파싱, bbox 중심 계산, depth 추출,
+#     pixel -> camera 3D 변환, 응답 payload 생성 유틸입니다.
+# 데이터 단위:
+#   - RealSense depth가 mm처럼 큰 값이면 m 단위로 변환합니다.
+#   - 반환 position은 camera_color_optical_frame 기준 m 단위입니다.
+# ============================================================
 import json
 import math
 import numpy as np
@@ -83,9 +92,9 @@ def get_depth_from_frame(frame, x, y, window_size=5):
 
 # 픽셀 좌표와 camera intrinsics를 이용해 카메라 좌표계 3D 좌표로 변환한다.
 def pixel_to_camera_coords(x, y, z, intrinsics):
-    fx = intrinsics["fx"]
+    fx = intrinsics["fx"] # 카메라의 x축 방향 초점거리 (pixel)
     fy = intrinsics["fy"]
-    ppx = intrinsics["ppx"]
+    ppx = intrinsics["ppx"] # 카메라 초점의 중심값 (pixel)
     ppy = intrinsics["ppy"]
 
     return (

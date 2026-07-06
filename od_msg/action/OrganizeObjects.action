@@ -1,3 +1,19 @@
+# ============================================================
+# OrganizeObjects.action
+# 역할:
+#   - task_manager_node가 robot_arm_node에 오배치 물체 목록 정리를 요청하는 action입니다.
+# Goal:
+#   - organize_objects_json: {"task": "organize_objects", "objects": [...]} 형태
+#     objects 안에는 name, pick_position, place_position, expected_zone 등이 들어갑니다.
+# Result:
+#   - success: 전체 정리 성공 여부
+#   - result_json: completed_objects, failed_objects, summary 포함 JSON
+#   - message: 결과 설명
+# Feedback:
+#   - current_object: 현재 정리 중인 물체 이름
+#   - current_index / total_count: 진행률
+#   - status: organizing, object_done 등 상태 문자열
+# ============================================================
 string organize_objects_json
 ---
 bool success

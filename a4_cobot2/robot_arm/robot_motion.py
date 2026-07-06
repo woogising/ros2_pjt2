@@ -1,3 +1,12 @@
+# ============================================================
+# robot_arm/robot_motion.py
+# 역할:
+#   - Doosan DSR_ROBOT2 API와 직접 연결되는 저수준 로봇 동작 함수 모음입니다.
+# 현재 상태:
+#   - 실제 pick/place는 아직 없고, Z축 소폭 이동 테스트 함수만 있습니다.
+# 주의:
+#   - 이 파일은 로봇 API를 직접 호출하므로 안전 정지, 단위(mm/m), 좌표계 변환을 가장 조심해야 합니다.
+# ============================================================
 # 동작 테스트용 임시파일
 
 # robot_motion.py
@@ -5,13 +14,23 @@
 import rclpy
 import DR_init
 
+# Doosan bringup에서 사용하는 로봇 namespace/model과 맞춰야 합니다.
 ROBOT_ID = 'dsr01'
 ROBOT_MODEL = 'm0609'
 
+# 테스트 모션 속도/가속도입니다. 실제 pick/place 연결 시 물체와 환경에 맞게 낮게 시작하세요.
 VELOCITY = 10
 ACC = 10
+
+# test_small_assist_motion()에서 현재 TCP를 Z축으로 몇 mm 올릴지 정하는 값입니다.
 TEST_Z_OFFSET_MM = 5.0
 
+# dsr:
+#   import DSR_ROBOT2 as dsr_module 한 뒤 저장되는 모듈 객체입니다.
+# _node:
+#   DSR_ROBOT2 내부 service/client 생성을 위해 필요한 별도 ROS2 node입니다.
+# _emergency:
+#   이 파일 내부의 소프트 stop 플래그입니다. 이미 실행 중인 로봇 API 명령을 즉시 끊는 실제 E-stop은 아닙니다.
 dsr = None
 _node = None
 _emergency = False

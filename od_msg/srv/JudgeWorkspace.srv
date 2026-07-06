@@ -1,3 +1,14 @@
+# ============================================================
+# JudgeWorkspace.srv
+# 역할:
+#   - WorkspaceJudgeNode에 감지된 물체 목록을 보내 정상/오배치 판단을 요청합니다.
+# 요청:
+#   - detected_objects_json: scan_workspace 결과에서 나온 objects/frame을 담은 JSON
+# 응답:
+#   - success: 판단 성공 여부
+#   - judgement_json: normal_objects, misplaced_objects, unknown_rule_objects 포함 JSON
+#   - message: 로그/디버깅용 메시지
+# ============================================================
 string detected_objects_json
 ---
 bool success

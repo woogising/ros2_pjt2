@@ -1,3 +1,15 @@
+# ============================================================
+# ScanWorkspace.srv
+# 역할:
+#   - ObjectDetectionNode에 작업공간 전체 스캔을 요청하는 service입니다.
+# 요청:
+#   - target_names_json: 탐지할 클래스 목록 JSON. 빈 문자열이면 전체 클래스 탐지로 해석합니다.
+#     예: {"targets": ["hammer", "screwdriver", "wrench"]}
+# 응답:
+#   - success: 스캔 성공 여부
+#   - detected_objects_json: 감지된 물체 목록 payload JSON
+#   - message: 로그/디버깅용 메시지
+# ============================================================
 string target_names_json
 ---
 bool success

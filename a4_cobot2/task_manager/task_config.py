@@ -1,6 +1,15 @@
+# ============================================================
+# task_manager/task_config.py
+# 역할:
+#   - task_manager_node가 사용하는 대상 물체, topic, service, action 이름을 한 곳에서 관리합니다.
+# 장점:
+#   - topic/service 이름을 여러 파일에 흩뿌리지 않아서 수정이 쉬워집니다.
+# 주의:
+#   - 실제 server 쪽 이름과 반드시 일치해야 합니다. 예: /judge_workspace, /organize_objects
+# ============================================================
 # task_manager/task_config.py
 
-# 작업공간에서 확인할 대상 물체 이름 목록입니다.
+# 작업공간에서 확인할 대상 물체 이름 목록
 TARGET_OBJECTS = [
     'hammer',
     'screwdriver',
@@ -9,19 +18,19 @@ TARGET_OBJECTS = [
     'drill',
 ]
 
-# ObjectDetectionNode가 반환하는 좌표 frame 이름입니다.
-DETECTION_FRAME = 'camera_frame'
+# ObjectDetectionNode가 반환하는 좌표 frame 이름
+# /scan_workspace 응답 payload의 frame과 맞춤
+DETECTION_FRAME = 'camera_color_optical_frame'
 
-# Topic 이름입니다.
+# Topic 이름
 TOPIC_TASK_COMMAND = '/task_command'
 TOPIC_TASK_STATUS = '/task_status'
 TOPIC_SAFETY_COMMAND = '/safety_command'
 TOPIC_USER_NOTICE = '/user_notice'
 
-# Service 이름입니다.
-# ObjectDetectionNode에서 service를 상대 이름 'get_3d_position'으로 만들었다면
-# 같은 namespace 기준으로 맞추기 위해 여기서도 'get_3d_position'을 사용합니다.
-SERVICE_GET_3D_POSITION = 'get_3d_position'
+# Service 이름
+SERVICE_GET_3D_POSITION = 'get_3d_position' # get_3d_position은 디버깅용 또는 pick 직전 재확인용으로 남겨둘 수 있음
+SERVICE_SCAN_WORKSPACE = 'scan_workspace' # 작업공간 전체를 한 번에 스캔하는 ObjectDetectionNode 서비스
 SERVICE_JUDGE_WORKSPACE = '/judge_workspace'
 
 # Action 이름입니다.

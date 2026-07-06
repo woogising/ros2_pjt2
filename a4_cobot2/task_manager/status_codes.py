@@ -1,3 +1,12 @@
+# ============================================================
+# task_manager/status_codes.py
+# 역할:
+#   - 노드 간 직접 주고받는 내부 상태 코드 문자열을 한 곳에서 관리합니다.
+# 장점:
+#   - task_manager_node, status_notifier_node가 같은 문자열을 공유하므로 오타를 줄일 수 있습니다.
+# 주의:
+#   - 새 상태를 추가하면 notification/notice_utils.py의 TASK_STATUS_NOTICE_MAP도 함께 확인하세요.
+# ============================================================
 # task_manager/status_codes.py
 
 # command_input_node가 /task_command로 보내는 명령어입니다.

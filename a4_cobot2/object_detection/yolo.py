@@ -1,3 +1,13 @@
+# ============================================================
+# object_detection/yolo.py
+# 역할:
+#   - YOLO 모델을 로드하고, 여러 RGB frame에서 탐지 결과를 모아 안정적인 detection 목록을 만듭니다.
+# 주요 함수:
+#   - get_all_detections(): 작업공간 전체 스캔용
+#   - get_best_detection(): 특정 target 하나만 찾는 구버전/디버깅용
+# 후처리:
+#   - 여러 frame의 bbox를 IoU 기준으로 묶고 평균 bbox/confidence를 사용합니다.
+# ============================================================
 ########## YoloModel ##########
 import os
 import json
@@ -22,7 +32,11 @@ YOLO_JSON_PATH = os.path.join(PACKAGE_PATH, "resource", YOLO_CLASS_NAME_JSON)
 
 class YoloModel:
     def __init__(self):
+        # YOLO_MODEL_PATH의 학습된 모델 파일을 로드합니다.
         self.model = YOLO(YOLO_MODEL_PATH)
+
+        # class_name_tool.json을 읽어 class_id <-> class_name 매핑을 만듭니다.
+        # get_all_detections()는 최종적으로 name과 class_id를 둘 다 반환합니다.
         with open(YOLO_JSON_PATH, "r", encoding="utf-8") as file:
             class_dict = json.load(file)
             self.class_id_to_name = {int(k): v for k, v in class_dict.items()}
@@ -42,9 +56,9 @@ class YoloModel:
             time.sleep(0.01)
 
         if not frames:
-            print("No frames captured in %.2f seconds", duration)
+            print(f"No frames captured in {duration:.2f} seconds")
 
-        print("%d frames captured", len(frames))
+        print(f"{len(frames)} frames captured")
         return list(frames.values())
 
     def get_best_detection(self, img_node, target):

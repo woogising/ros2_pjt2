@@ -1,3 +1,11 @@
+# ============================================================
+# workspace/workspace_judge_node.py
+# 역할:
+#   - /judge_workspace service server입니다.
+#   - task_manager_node가 보낸 detected_objects_json을 받아 정상/오배치/규칙 미정 물체로 분류합니다.
+# 판단 기준:
+#   - workspace_judge_utils.py의 DEFAULT_ZONES, CLASS_TO_ZONE
+# ============================================================
 import json
 import rclpy
 

@@ -1,3 +1,14 @@
+# ============================================================
+# object_detection/realsense.py
+# 역할:
+#   - RealSense 관련 ROS topic을 구독해서 최신 RGB frame, aligned depth frame, camera intrinsics를 보관합니다.
+# 구독 topic:
+#   - /camera/camera/color/image_raw
+#   - /camera/camera/aligned_depth_to_color/image_raw
+#   - /camera/camera/color/camera_info
+# 주의:
+#   - depth는 color에 aligned된 topic을 사용해야 bbox 중심 픽셀로 depth를 읽을 수 있습니다.
+# ============================================================
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
@@ -7,9 +18,21 @@ class ImgNode(Node):
     def __init__(self):
         super().__init__('img_node')
         self.bridge = CvBridge()
+        # color_frame:
+        #   YOLO 입력으로 사용할 최신 RGB 이미지입니다. OpenCV BGR 형식으로 저장됩니다.
         self.color_frame = None
+
+        # color_frame_stamp:
+        #   같은 frame을 여러 번 중복 저장하지 않기 위한 timestamp 문자열입니다.
         self.color_frame_stamp = None
+
+        # depth_frame:
+        #   color image에 aligned된 depth image입니다. bbox 중심 픽셀에서 depth를 읽습니다.
         self.depth_frame = None
+
+        # intrinsics:
+        #   CameraInfo.K에서 fx, fy, ppx, ppy를 추출한 dict입니다.
+        #   pixel 좌표를 camera 3D 좌표로 바꿀 때 사용합니다.
         self.intrinsics = None
         self.color_subscription = self.create_subscription(
             Image, '/camera/camera/color/image_raw', self.color_callback, 10)

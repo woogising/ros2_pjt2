@@ -1,3 +1,12 @@
+# ============================================================
+# voice/MicController.py
+# 역할:
+#   - PyAudio 마이크 stream을 열고 닫는 저수준 유틸입니다.
+#   - wakeup_word는 이 stream을 직접 읽고, 별도 녹음/저장이 필요할 때는 record_audio()를 씁니다.
+# 주의:
+#   - command_input_node에서는 wakeword 대기용 stream으로 주로 사용합니다.
+#   - STT 녹음은 현재 stt.py의 sounddevice가 별도로 수행하므로 이 클래스와 녹음 경로가 분리되어 있습니다.
+# ============================================================
 from dataclasses import dataclass
 import wave
 import io

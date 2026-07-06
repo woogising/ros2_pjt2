@@ -1,3 +1,14 @@
+# ============================================================
+# notification/status_notifier_node.py
+# 역할:
+#   - 내부 상태 topic을 사람이 읽을 수 있는 안내문으로 바꾸고, 필요하면 TTS로 출력합니다.
+# 입력 topic:
+#   - /task_status: task_manager_node 내부 상태 코드
+#   - /user_notice: task_manager_node가 직접 만든 최종 사용자 안내문
+#   - /safety_state: safety_node 안전 상태
+# 주의:
+#   - /task_status와 /user_notice가 같은 의미를 중복 안내할 수 있으므로 last_notice로 연속 중복을 막습니다.
+# ============================================================
 import rclpy
 
 from rclpy.node import Node
@@ -15,32 +26,25 @@ class StatusNotifierNode(Node):
         self.declare_parameter('use_tts', False)
         self.use_tts = self.get_parameter('use_tts').get_parameter_value().bool_value
 
+        # tts:
+        #   use_tts 파라미터가 True이고 초기화에 성공했을 때만 TTS 객체가 들어갑니다.
         self.tts = None
+
+        # last_notice:
+        #   같은 안내 문장이 연속으로 두 번 출력/TTS되는 것을 막기 위한 마지막 안내문 캐시입니다.
         self.last_notice = None
 
         if self.use_tts:
             self.initialize_tts()
 
-        self.task_status_sub = self.create_subscription(
-            String,
-            '/task_status',
-            self.task_status_callback,
-            10
-        )
+        # 내부 상태 표시용
+        self.task_status_sub = self.create_subscription(String, '/task_status', self.task_status_callback, 10)
 
-        self.safety_state_sub = self.create_subscription(
-            String,
-            '/safety_state',
-            self.safety_state_callback,
-            10
-        )
+        # 실제 사용자 안내용
+        self.user_notice_sub = self.create_subscription(String, '/user_notice', self.user_notice_callback, 10)
 
-        self.user_notice_sub = self.create_subscription(
-            String,
-            '/user_notice',
-            self.user_notice_callback,
-            10
-        )
+        self.safety_state_sub = self.create_subscription(String, '/safety_state', self.safety_state_callback, 10)
+        
 
         self.get_logger().info('StatusNotifierNode started.')
         self.notify('상태 안내 노드가 시작되었습니다.', speak=False)
@@ -98,7 +102,6 @@ class StatusNotifierNode(Node):
         self.last_notice = notice
 
         self.get_logger().info(f'USER NOTICE: {notice}')
-        print(f'[USER NOTICE] {notice}')
 
         if speak and self.use_tts and self.tts is not None:
             self.tts.speak(notice)

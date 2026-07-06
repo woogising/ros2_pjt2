@@ -1,3 +1,13 @@
+# ============================================================
+# voice/stt.py
+# 역할:
+#   - 마이크 음성을 일정 시간 녹음하고 OpenAI Whisper API로 텍스트 변환합니다.
+# 사용 위치:
+#   - command_input_node.process_voice_command_once()에서 wakeword 이후 한 번 호출됩니다.
+# 주의:
+#   - .env의 OPENAI_API_KEY가 필요합니다.
+#   - 현재 녹음 시간은 self.duration으로 제어합니다.
+# ============================================================
 import os
 import tempfile
 
@@ -24,8 +34,14 @@ class STT:
 
         self.client = OpenAI(api_key=openai_api_key)
 
-        self.duration = 3 # 녹음 기간 설정(단위: 초)
-        self.samplerate = 16000 # 1초에 오디오 샘플을 몇 개 기록할지 정하는 값
+        # duration:
+        #   wakeword 이후 사용자의 실제 명령을 몇 초 동안 녹음할지 정합니다.
+        #   너무 짧으면 문장이 잘리고, 너무 길면 응답이 느려집니다.
+        self.duration = 3
+
+        # samplerate:
+        #   Whisper에 보낼 wav 파일의 sampling rate입니다.
+        self.samplerate = 16000
 
     # 마이크로 5초 동안 음성을 녹음하고 Whisper API를 이용해 텍스트로 변환하는 함수
     def speech2text(self) -> str:

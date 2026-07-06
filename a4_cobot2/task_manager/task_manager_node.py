@@ -1,3 +1,17 @@
+# ============================================================
+# task_manager/task_manager_node.py
+# 역할:
+#   - 전체 작업 흐름의 중심 제어 노드입니다.
+#   - 음성 명령을 받아 작업공간 스캔, 배치 판단, 로봇 정리 action 요청, 재검증을 순서대로 진행합니다.
+# 주요 입력:
+#   - /task_command: command_input_node가 발행한 내부 명령어
+# 주요 출력:
+#   - /task_status: 내부 상태 코드
+#   - /user_notice: 사용자에게 직접 보여주거나 읽어줄 안내문
+#   - /safety_command: safety_node에 stop/clear 요청
+# 주요 client:
+#   - scan_workspace service, judge_workspace service, organize_objects action
+# ============================================================
 import json
 import rclpy
 
@@ -5,7 +19,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from std_msgs.msg import String
 
-from od_msg.srv import SrvDepthPosition, JudgeWorkspace
+from od_msg.srv import SrvDepthPosition, JudgeWorkspace, ScanWorkspace
 from od_msg.action import OrganizeObjects
 
 from task_manager import status_codes as Status
@@ -13,6 +27,7 @@ from task_manager.task_config import (
     ACTION_ORGANIZE_OBJECTS,
     ACTION_WAIT_TIMEOUT_SEC,
     SERVICE_GET_3D_POSITION,
+    SERVICE_SCAN_WORKSPACE,
     SERVICE_JUDGE_WORKSPACE,
     SERVICE_WAIT_TIMEOUT_SEC,
     TARGET_OBJECTS,
@@ -23,9 +38,10 @@ from task_manager.task_config import (
 )
 from task_manager.payload_utils import (
     is_valid_position,
-    is_workspace_detection_task,
     make_detected_object,
+    is_workspace_detection_task,
     make_organize_goal_json,
+    make_scan_workspace_request_json,
     make_workspace_judgement_request_json,
     parse_json_payload,
 )
@@ -44,54 +60,78 @@ class TaskManagerNode(Node):
     def __init__(self):
         super().__init__('task_manager_node')
 
-        self.task_command_sub = self.create_subscription(
-            String,
-            TOPIC_TASK_COMMAND,
-            self.task_command_callback,
-            10,
-        )
+        self.task_command_sub = self.create_subscription(String, TOPIC_TASK_COMMAND, self.task_command_callback, 10)
 
-        self.task_status_pub = self.create_publisher(
-            String,
-            TOPIC_TASK_STATUS,
-            10,
-        )
+        self.task_status_pub = self.create_publisher(String, TOPIC_TASK_STATUS, 10)
 
-        self.object_position_client = self.create_client(
-            SrvDepthPosition,
-            SERVICE_GET_3D_POSITION,
-        )
+        # 거의 디버깅용
+        # self.object_position_client = self.create_client(SrvDepthPosition, SERVICE_GET_3D_POSITION)
 
-        self.judge_workspace_client = self.create_client(
-            JudgeWorkspace,
-            SERVICE_JUDGE_WORKSPACE,
-        )
+        # ObjectDetectionNode의 scan_workspace 서비스를 호출하기 위한 client입니다.
+        # 작업공간 전체를 한 번에 YOLO로 스캔할 때 사용합니다.
+        # 요청: target_names_json
+        # 응답: detected_objects_json
+        self.scan_workspace_client = self.create_client(ScanWorkspace, SERVICE_SCAN_WORKSPACE)
 
-        self.organize_objects_action_client = ActionClient(
-            self,
-            OrganizeObjects,
-            ACTION_ORGANIZE_OBJECTS,
-        )
+        # WorkspaceJudgeNode의 /judge_workspace 서비스를 호출하는 client입니다.
+        # /scan_workspace 결과를 넘겨 normal/misplaced/unknown_rule 목록을 받습니다.
+        self.judge_workspace_client = self.create_client(JudgeWorkspace, SERVICE_JUDGE_WORKSPACE)
 
-        self.safety_command_pub = self.create_publisher(
-            String,
-            TOPIC_SAFETY_COMMAND,
-            10,
-        )
+        # RobotArmNode의 /organize_objects action server에 정리 대상 목록을 보냅니다.
+        # service가 아니라 action인 이유: 여러 물체를 순서대로 정리하면서 feedback/cancel/result가 필요하기 때문입니다.
+        self.organize_objects_action_client = ActionClient(self, OrganizeObjects, ACTION_ORGANIZE_OBJECTS)
 
-        self.user_notice_pub = self.create_publisher(
-            String,
-            TOPIC_USER_NOTICE,
-            10,
-        )
+        self.safety_command_pub = self.create_publisher(String, TOPIC_SAFETY_COMMAND, 10)
 
+        self.user_notice_pub = self.create_publisher(String, TOPIC_USER_NOTICE, 10)
+
+        # -------------------------
+        # TaskManager 내부 상태 변수
+        # -------------------------
+        # current_task:
+        #   현재 진행 중인 큰 작업 이름입니다.
+        #   예: check_workspace, recheck_workspace, start_organize
+        #   비동기 service/action 응답이 늦게 돌아왔을 때, 이 값으로 오래된 응답인지 확인합니다.
         self.current_task = None
+
+        # is_busy:
+        #   한 번에 하나의 큰 작업만 처리하기 위한 플래그입니다.
+        #   True일 때 새 check_workspace/start_organize 명령이 들어오면 BUSY 상태를 발행합니다.
         self.is_busy = False
+
+        # target_objects:
+        #   /scan_workspace에 넘길 탐지 대상 클래스 이름 목록입니다.
+        #   task_config.py의 TARGET_OBJECTS에서 가져옵니다.
         self.target_objects = TARGET_OBJECTS
+
+        # current_target_index:
+        #   과거 get_3d_position 반복 호출 구조에서 쓰던 인덱스입니다.
+        #   현재 /scan_workspace 단일 호출 구조에서는 거의 사용하지 않지만, 이전 구조 추적용으로 남아 있습니다.
         self.current_target_index = 0
+
+        # detected_objects:
+        #   ObjectDetectionNode의 /scan_workspace 응답에서 받은 물체 dict 목록입니다.
+        #   각 원소 예: {'name': 'hammer', 'position': {'x': ..., 'y': ..., 'z': ...}, ...}
         self.detected_objects = []
+
+        # detected_objects_frame:
+        #   detected_objects의 position이 어떤 좌표계 기준인지 저장합니다.
+        #   현재 기본값은 camera_color_optical_frame입니다.
+        self.detected_objects_frame = None
+
+        # latest_workspace_judgement:
+        #   가장 최근의 workspace 판단 결과를 저장합니다.
+        #   start_organize 명령이 들어오면 여기서 misplaced_objects를 꺼내 robot_arm_node에 보냅니다.
         self.latest_workspace_judgement = None
+
+        # current_robot_goal_handle:
+        #   robot_arm_node에 보낸 organize action goal handle입니다.
+        #   stop 명령이 들어왔을 때 cancel_goal_async()를 호출하기 위해 저장합니다.
         self.current_robot_goal_handle = None
+
+        # stop_requested:
+        #   task_manager 레벨에서 현재 작업 흐름을 중단해야 하는지 나타내는 플래그입니다.
+        #   robot_arm의 실제 stop 상태는 /emergency_stop과 robot_motion 쪽에서 별도로 관리합니다.
         self.stop_requested = False
 
         self.get_logger().info('TaskManagerNode started.')
@@ -171,6 +211,7 @@ class TaskManagerNode(Node):
         self.current_task = task_name
         self.current_target_index = 0
         self.detected_objects = []
+        self.detected_objects_frame = None
         self.stop_requested = False
 
         if task_name == Status.TASK_CHECK_WORKSPACE:
@@ -184,10 +225,10 @@ class TaskManagerNode(Node):
 
         self.publish_safety_command(SAFETY_COMMAND_CLEAR)
 
-        if not self.object_position_client.wait_for_service(timeout_sec=SERVICE_WAIT_TIMEOUT_SEC):
-            self.get_logger().error('get_3d_position 서비스를 찾을 수 없습니다.')
+        if not self.scan_workspace_client.wait_for_service(timeout_sec=SERVICE_WAIT_TIMEOUT_SEC):
+            self.get_logger().error('scan_workspace 서비스를 찾을 수 없습니다.')
             self.publish_status(Status.OBJECT_DETECTION_SERVICE_UNAVAILABLE)
-            self.publish_user_notice('물체 위치 인식 서비스를 찾을 수 없습니다.')
+            self.publish_user_notice('작업공간 스캔 서비스를 찾을 수 없습니다.')
             self.finish_current_task()
             return
 
@@ -196,76 +237,87 @@ class TaskManagerNode(Node):
         else:
             self.publish_status(Status.RECHECKING_WORKSPACE)
 
-        self.request_next_object_position()
+        self.request_scan_workspace()
 
-    # target_objects 목록에서 다음 물체 이름을 꺼내 ObjectDetectionNode에 3D 위치를 비동기로 요청하는 함수
-    def request_next_object_position(self):
+    # ObjectDetectionNode의 scan_workspace 서비스를 호출해서 작업공간 전체 물체 목록을 한 번에 요청하는 함수
+    def request_scan_workspace(self):
         if self.stop_requested:
-            self.get_logger().warn('stop 요청으로 object position 요청을 중단합니다.')
+            self.get_logger().warn('stop 요청으로 scan_workspace 요청을 중단합니다.')
             self.publish_status(Status.CHECK_WORKSPACE_STOPPED)
             self.finish_current_task()
             return
 
         if not self.is_workspace_detection_task():
-            self.get_logger().warn('현재 작업이 작업공간 감지 흐름이 아니므로 위치 요청을 중단합니다.')
+            self.get_logger().warn('현재 작업이 작업공간 감지 흐름이 아니므로 scan_workspace 요청을 중단합니다.')
             return
 
-        if self.current_target_index >= len(self.target_objects):
-            self.finish_check_workspace_detection()
-            return
+        request = ScanWorkspace.Request()
+        request.target_names_json = make_scan_workspace_request_json(self.target_objects)
 
-        target_name = self.target_objects[self.current_target_index]
+        self.get_logger().info(f'ObjectDetectionNode에 작업공간 전체 스캔 요청: {request.target_names_json}')
 
-        request = SrvDepthPosition.Request()
-        request.target = target_name
+        future = self.scan_workspace_client.call_async(request)
+        future.add_done_callback(self.scan_workspace_response_callback)
 
-        self.get_logger().info(f'ObjectDetectionNode에 위치 요청: {target_name}')
 
-        future = self.object_position_client.call_async(request)
-        future.add_done_callback(
-            lambda future_result, target=target_name: self.object_position_response_callback(
-                future_result,
-                target,
-            )
-        )
-
-    # ObjectDetectionNode의 /get_3d_position 응답을 받아 유효한 위치면 저장하고 다음 물체 요청으로 넘어가는 함수
-    def object_position_response_callback(self, future, target_name: str):
+    # scan_workspace 서비스 응답을 받아 감지된 전체 물체 목록을 저장하고 workspace 판단 단계로 넘기는 함수
+    def scan_workspace_response_callback(self, future):
         if self.stop_requested or not self.is_workspace_detection_task():
-            self.get_logger().warn('stop 요청 또는 작업 변경으로 다음 object position 요청을 진행하지 않습니다.')
+            self.get_logger().warn('stop 요청 또는 작업 변경으로 scan_workspace 응답 처리를 중단합니다.')
             return
 
         try:
             response = future.result()
-            position = list(response.depth_position)
 
-            self.get_logger().info(f'{target_name} 위치 응답: {position}')
+            if not response.success:
+                self.get_logger().error(f'scan_workspace 실패: {response.message}')
+                self.publish_status(Status.OBJECT_DETECTION_SERVICE_UNAVAILABLE)
+                self.publish_user_notice('작업공간 스캔에 실패했습니다.')
+                self.finish_current_task()
+                return
 
-            if is_valid_position(position):
-                detected_object = make_detected_object(target_name, position)
-                self.detected_objects.append(detected_object)
+            scan_payload = parse_json_payload(response.detected_objects_json)
+            self.detected_objects = scan_payload.get('objects', [])
+            self.detected_objects_frame = scan_payload.get('frame', 'camera_color_optical_frame')
 
-                self.get_logger().info(f'감지된 물체 추가: {detected_object}')
+            summary = scan_payload.get('summary', {})
+            self.get_logger().info(
+                f'작업공간 스캔 완료: detected={summary.get("detected_count")}, '
+                f'skipped={summary.get("skipped_count")}, '
+                f'raw={summary.get("raw_detection_count")}'
+            )
 
-            else:
-                self.get_logger().warn(f'{target_name} 감지 실패 또는 유효하지 않은 위치입니다.')
+            self.finish_check_workspace_detection()
+
+        except json.JSONDecodeError as e:
+            self.get_logger().error(f'scan_workspace JSON 파싱 실패: {e}')
+            self.publish_status(Status.WORKSPACE_JUDGEMENT_JSON_ERROR)
+            self.publish_user_notice('작업공간 스캔 결과를 해석하지 못했습니다.')
+            self.finish_current_task()
 
         except Exception as e:
-            self.get_logger().error(f'{target_name} 위치 요청 중 오류 발생: {e}')
+            self.get_logger().error(f'scan_workspace 응답 처리 중 오류 발생: {e}')
+            self.publish_status(Status.WORKSPACE_JUDGEMENT_RESPONSE_ERROR)
+            self.publish_user_notice('작업공간 스캔 응답 처리 중 오류가 발생했습니다.')
+            self.finish_current_task()
 
-        if self.stop_requested or not self.is_workspace_detection_task():
-            self.get_logger().warn('stop 요청으로 다음 object position 요청을 진행하지 않습니다.')
-            return
 
-        self.current_target_index += 1
-        self.request_next_object_position()
-
-    # 모든 target_objects에 대한 위치 요청이 끝났을 때 workspace_judge_node 판단으로 넘어가는 함수
+    # 모든 target_objects에 대한 위치 요청 또는 scan_workspace 응답 처리가 끝났을 때
+    # 작업공간 판단 단계로 넘어갈지, 물체 없음 상태로 종료할지 결정하는 함수
     def finish_check_workspace_detection(self):
         if len(self.detected_objects) == 0:
             self.get_logger().warn('감지된 물체가 없습니다.')
-            self.publish_status(Status.NO_OBJECTS_DETECTED)
-            self.publish_user_notice('작업공간에서 감지된 물체가 없습니다.')
+
+            if self.current_task == Status.TASK_RECHECK_WORKSPACE:
+                self.publish_status(Status.RECHECK_NO_OBJECTS_DETECTED)
+                self.publish_user_notice(
+                    '재검증 중 감지된 물체가 없습니다. 카메라 시야 또는 작업공간을 확인해주세요.'
+                )
+
+            else:
+                self.publish_status(Status.NO_OBJECTS_DETECTED)
+                self.publish_user_notice('작업공간에서 감지된 물체가 없습니다.')
+
             self.finish_current_task()
             return
 
@@ -280,10 +332,13 @@ class TaskManagerNode(Node):
             self.finish_current_task()
             return
 
+        task_at_request_time = self.current_task
+
         request = JudgeWorkspace.Request()
         request.detected_objects_json = make_workspace_judgement_request_json(
-            task_name=self.current_task,
+            task_name=task_at_request_time,
             objects=self.detected_objects,
+            frame=self.detected_objects_frame or 'camera_color_optical_frame',
         )
 
         self.get_logger().info(f'WorkspaceJudgeNode에 판단 요청: {request.detected_objects_json}')
@@ -291,11 +346,26 @@ class TaskManagerNode(Node):
         self.publish_status(Status.JUDGING_WORKSPACE)
 
         future = self.judge_workspace_client.call_async(request)
-        future.add_done_callback(self.workspace_judgement_response_callback)
+        future.add_done_callback(
+            lambda future_result, task=task_at_request_time:
+                self.workspace_judgement_response_callback(
+                    future_result,
+                    task,
+                )
+        )
 
     # workspace_judge_node의 /judge_workspace 응답을 받아 판단 결과를 저장하고 다음 상태를 결정하는 함수
-    def workspace_judgement_response_callback(self, future):
-        task_at_response_time = self.current_task
+    def workspace_judgement_response_callback(self, future, task_at_request_time):
+        if self.stop_requested:
+            self.get_logger().warn('stop 요청으로 workspace judgement 응답 처리를 중단합니다.')
+            return
+
+        if self.current_task != task_at_request_time:
+            self.get_logger().warn(
+                f'작업 상태가 변경되어 이전 workspace judgement 응답을 무시합니다. '
+                f'request_task={task_at_request_time}, current_task={self.current_task}'
+            )
+            return
 
         try:
             response = future.result()
@@ -310,10 +380,10 @@ class TaskManagerNode(Node):
 
             self.get_logger().info(f'작업공간 판단 결과: {judgement_payload}')
 
-            if task_at_response_time == Status.TASK_CHECK_WORKSPACE:
+            if task_at_request_time == Status.TASK_CHECK_WORKSPACE:
                 self.handle_initial_workspace_judgement_result(judgement_payload)
 
-            elif task_at_response_time == Status.TASK_RECHECK_WORKSPACE:
+            elif task_at_request_time == Status.TASK_RECHECK_WORKSPACE:
                 self.handle_recheck_workspace_judgement_result(judgement_payload)
 
             else:
@@ -470,6 +540,15 @@ class TaskManagerNode(Node):
             self.get_logger().warn('저장된 작업공간 판단 결과가 없습니다.')
             self.publish_status(Status.NO_WORKSPACE_JUDGEMENT_AVAILABLE)
             self.publish_user_notice('저장된 작업공간 판단 결과가 없습니다. 먼저 작업공간을 확인해주세요.')
+            self.finish_current_task()
+            return
+        
+        result = self.latest_workspace_judgement.get('result', 'unknown')
+
+        if result == 'unknown_rule_found':
+            self.get_logger().warn('배치 규칙을 알 수 없는 물체가 있어 정리 작업을 시작하지 않습니다.')
+            self.publish_status(Status.WORKSPACE_UNKNOWN_RULE_FOUND)
+            self.publish_user_notice('배치 규칙을 알 수 없는 물체가 있어 정리 작업을 시작할 수 없습니다. 규칙을 먼저 확인해주세요.')
             self.finish_current_task()
             return
 

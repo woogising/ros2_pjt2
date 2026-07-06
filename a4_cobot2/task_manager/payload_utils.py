@@ -1,3 +1,12 @@
+# ============================================================
+# task_manager/payload_utils.py
+# 역할:
+#   - task_manager_node가 service/action에 보낼 JSON 문자열을 만드는 유틸입니다.
+# 핵심 payload:
+#   - scan_workspace 요청: {"targets": [...]}
+#   - judge_workspace 요청: {"task": ..., "frame": ..., "objects": [...]}
+#   - organize_objects goal: {"task": "organize_objects", "objects": [...]}
+# ============================================================
 # task_manager/payload_utils.py
 
 import json
@@ -12,6 +21,24 @@ def is_workspace_detection_task(task_name: str) -> bool:
         Status.TASK_CHECK_WORKSPACE,
         Status.TASK_RECHECK_WORKSPACE,
     ]
+
+# scan_workspace 서비스에 보낼 target_names_json 문자열을 만듭니다.
+# target_objects가 비어 있거나 None이면 ObjectDetectionNode가 모든 클래스를 탐지하도록 빈 문자열을 반환합니다.
+"""
+{
+    "targets": ["hammer", "screwdriver", "wrench", "pliers", "drill"]
+}
+"""
+def make_scan_workspace_request_json(target_objects: list) -> str:
+    if not target_objects:
+        return ''
+
+    payload = {
+        'targets': target_objects,
+    }
+
+    return json.dumps(payload, ensure_ascii=False)
+
 
 
 # ObjectDetectionNode가 반환한 3D 좌표가 유효한 감지 결과인지 판단합니다.

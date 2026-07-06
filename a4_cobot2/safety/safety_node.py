@@ -1,3 +1,11 @@
+# ============================================================
+# safety/safety_node.py
+# 역할:
+#   - /safety_command에서 stop/clear 명령을 받아 현재 안전 상태를 관리합니다.
+# 출력 topic:
+#   - /emergency_stop: robot_arm_node가 직접 구독하는 Bool stop 신호
+#   - /safety_state: status_notifier_node가 사용자 안내로 변환하는 상태 문자열
+# ============================================================
 import rclpy
 
 from rclpy.node import Node
@@ -17,6 +25,9 @@ class SafetyNode(Node):
     def __init__(self):
         super().__init__('safety_node')
 
+        # emergency_stop_active:
+        #   현재 safety_node가 관리하는 stop 상태입니다.
+        #   True이면 /emergency_stop=True와 /safety_state='emergency_stop'을 발행합니다.
         self.emergency_stop_active = False
 
         self.command_qos = QoSProfile(

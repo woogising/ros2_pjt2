@@ -1,3 +1,11 @@
+# ============================================================
+# notification/notice_utils.py
+# 역할:
+#   - 내부 상태 코드와 judgement payload를 사용자가 이해할 수 있는 자연어 안내문으로 바꿉니다.
+# 사용 위치:
+#   - status_notifier_node: /task_status, /safety_state를 자연어로 변환
+#   - task_manager_node: 판단 결과 payload를 /user_notice 문장으로 변환
+# ============================================================
 # notification/notice_utils.py
 
 import re
