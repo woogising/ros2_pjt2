@@ -23,7 +23,7 @@ import numpy as np
 PACKAGE_NAME = "a4_cobot2"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 
-YOLO_MODEL_FILENAME = "yolov8n_tools_0122.pt"
+YOLO_MODEL_FILENAME = "yolo_seg_best_v1.pt"
 YOLO_CLASS_NAME_JSON = "class_name_tool.json"
 
 YOLO_MODEL_PATH = os.path.join(PACKAGE_PATH, "resource", YOLO_MODEL_FILENAME)
@@ -116,7 +116,7 @@ class YoloModel:
                 else:
                     print(f"Unknown target class ignored: {name}")
 
-        results = self.model(frames, verbose=False)
+        results = self.model(frames, verbose=False, retina_masks=True)
         detections = self._aggregate_detections(results)
 
         converted = []
@@ -134,6 +134,7 @@ class YoloModel:
                     "class_id": class_id,
                     "box": det["box"],
                     "confidence": float(det["score"]),
+                    "mask": det.get("mask"),
                 }
             )
 
@@ -147,13 +148,15 @@ class YoloModel:
         """
         raw = []
         for res in results:
-            for box, score, label in zip(
+            masks = res.masks.data.cpu().numpy() if res.masks is not None else None
+            for k, (box, score, label) in enumerate(zip(
                 res.boxes.xyxy.tolist(),
                 res.boxes.conf.tolist(),
                 res.boxes.cls.tolist(),
-            ):
+            )):
                 if score >= confidence_threshold:
-                    raw.append({"box": box, "score": score, "label": int(label)})
+                    mask = masks[k] if (masks is not None and k < len(masks)) else None
+                    raw.append({"box": box, "score": score, "label": int(label), "mask": mask})
 
         final = []
         used = [False] * len(raw)
@@ -172,12 +175,14 @@ class YoloModel:
             boxes = np.array([g["box"] for g in group])
             scores = np.array([g["score"] for g in group])
             labels = [g["label"] for g in group]
+            best = max(group, key=lambda g: g["score"])
 
             final.append(
                 {
                     "box": boxes.mean(axis=0).tolist(),
                     "score": float(scores.mean()),
                     "label": Counter(labels).most_common(1)[0][0],
+                    "mask": best["mask"],
                 }
             )
 

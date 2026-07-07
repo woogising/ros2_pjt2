@@ -12,108 +12,74 @@
 # ============================================================
 # workspace/workspace_judge_utils.py
 
-# 작업공간을 카메라 화면 기준 4개 구역으로 나눕니다.
-# 현재 ObjectDetectionNode의 position은 camera_color_optical_frame 기준입니다.
-# x < 0 이면 카메라 화면 기준 왼쪽, x > 0 이면 오른쪽입니다.
-# y < 0 이면 카메라 화면 기준 위쪽, y > 0 이면 아래쪽입니다.
-#
-# 주의:
-# 아래 좌표는 임시값입니다.
-# 실제 /scan_workspace 결과를 보고 x, y 범위를 반드시 보정해야 합니다.
-# DEFAULT_ZONES:
-#   작업공간을 4개 구역으로 나눈 임시 좌표 규칙입니다.
-#   x/y는 ObjectDetectionNode가 계산한 camera_color_optical_frame 기준 position입니다.
-#   place_position은 해당 zone으로 옮길 때 사용할 대표 위치입니다.
-#   실제 로봇 제어 전에는 robot base frame으로 변환해야 합니다.
+# 작업공간을 robot base 좌표계(mm) 기준 4개 구역(green/yellow/red/blue)으로 나눕니다.
+# detection이 3자세 스캔으로 물체 위치를 base 좌표(mm)로 변환해 보내므로 zone도 base 좌표(mm)입니다.
+# 각 zone은 네 꼭짓점을 감싸는 축정렬 바운딩박스(x_min~x_max, y_min~y_max)로 판정합니다.
+# place_position은 그 zone으로 옮길 때 놓을 대표 위치이며, z는 놓을 높이(mm)입니다.
 DEFAULT_ZONES = {
-    'left_top': {
-        'label': '왼쪽 위',
-        'x_min': -0.45,
-        'x_max': 0.0,
-        'y_min': -0.35,
-        'y_max': 0.0,
+    'green': {
+        'label': 'green',
+        'x_min': 137.94,
+        'x_max': 490.45,
+        'y_min': 14.2,
+        'y_max': 328.53,
         'place_position': {
-            'x': -0.225,
-            'y': -0.175,
-            'z': 0.45,
+            'x': 314.2,
+            'y': 171.4,
+            'z': 4.0,
         },
     },
-    'left_bottom': {
-        'label': '왼쪽 아래',
-        'x_min': -0.45,
-        'x_max': 0.0,
-        'y_min': 0.0,
-        'y_max': 0.35,
+    'yellow': {
+        'label': 'yellow',
+        'x_min': 142.96,
+        'x_max': 498.30,
+        'y_min': -330.17,
+        'y_max': -10.7,
         'place_position': {
-            'x': -0.225,
-            'y': 0.175,
-            'z': 0.45,
+            'x': 320.6,
+            'y': -170.4,
+            'z': 4.0,
         },
     },
-    'right_top': {
-        'label': '오른쪽 위',
-        'x_min': 0.0,
-        'x_max': 0.45,
-        'y_min': -0.35,
-        'y_max': 0.0,
+    'red': {
+        'label': 'red',
+        'x_min': 517.10,
+        'x_max': 923.67,
+        'y_min': 1.64,
+        'y_max': 327.05,
         'place_position': {
-            'x': 0.225,
-            'y': -0.175,
-            'z': 0.45,
+            'x': 720.4,
+            'y': 164.3,
+            'z': 4.0,
         },
     },
-    'right_bottom': {
-        'label': '오른쪽 아래',
-        'x_min': 0.0,
-        'x_max': 0.45,
-        'y_min': 0.0,
-        'y_max': 0.35,
+    'blue': {
+        'label': 'blue',
+        'x_min': 508.94,
+        'x_max': 922.62,
+        'y_min': -321.72,
+        'y_max': -13.98,
         'place_position': {
-            'x': 0.225,
-            'y': 0.175,
-            'z': 0.45,
+            'x': 715.8,
+            'y': -167.9,
+            'z': 4.0,
         },
     },
 }
 
 
-# 클래스 이름별로 원래 있어야 하는 구역을 지정합니다.
-# 현재 YOLO 모델이 인식하는 클래스는 class_name_tool.json 기준으로
-# drill, hammer, pliers, screwdriver, wrench입니다.
-# CLASS_TO_ZONE:
-#   물체 클래스 이름별로 원래 있어야 하는 zone 이름을 지정합니다.
-#   YOLO class name과 key가 정확히 일치해야 합니다.
-#   여기에 없는 클래스는 unknown_rule_objects로 분류됩니다.
 CLASS_TO_ZONE = {
-    # 예시: 공구류를 오른쪽 위/아래로 나누는 규칙
-    'hammer': 'right_top',
-    'screwdriver': 'right_top',
-    'wrench': 'right_bottom',
-    'pliers': 'right_bottom',
-    'drill': 'left_bottom',
-
-    # 나중에 과일 모델을 추가하거나 재학습하면 아래처럼 확장하면 됩니다.
-    # 'apple': 'left_top',
-    # 'banana': 'left_top',
-}
-
-
-# 클래스별로 물체를 놓을 정확한 좌표(슬롯)를 지정합니다.
-# 같은 zone에 여러 클래스가 매핑돼도 서로 겹치지 않도록, zone을 나눈 서로 다른 좌표를 줍니다.
-# 각 좌표는 그 클래스의 expected zone 범위 안에 있어야 합니다.
-# 주의: 아래 좌표는 임시값입니다. 실제 /scan_workspace 결과로 보정해야 합니다.
-# x/y는 camera_color_optical_frame 기준이며, 로봇 제어 직전 base frame으로 변환해야 합니다.
-CLASS_TO_PLACE_POSITION = {
-    # right_top (x 0.0~0.45, y -0.35~0.0)을 좌/우로 나눠 배정
-    'hammer': {'x': 0.1125, 'y': -0.175, 'z': 0.45},
-    'screwdriver': {'x': 0.3375, 'y': -0.175, 'z': 0.45},
-
-    # right_bottom (x 0.0~0.45, y 0.0~0.35)을 좌/우로 나눠 배정
-    'wrench': {'x': 0.1125, 'y': 0.175, 'z': 0.45},
-    'pliers': {'x': 0.3375, 'y': 0.175, 'z': 0.45},
-
-    # left_bottom (x -0.45~0.0, y 0.0~0.35) — drill 하나뿐이라 중앙
-    'drill': {'x': -0.225, 'y': 0.175, 'z': 0.45},
+    # 클래스 → zone 매핑. zone 이름은 green / yellow / red / blue 중 하나여야 합니다.
+    # 매핑이 없는 클래스는 unknown_rule_objects로 분류됩니다.
+    # key는 YOLO class name과 정확히 일치해야 합니다.
+    'hammer': 'red',
+    'screwdriver': 'red',
+    'bolt': 'blue',
+    'tape': 'blue',
+    'green_apple': 'green',
+    'pineapple': 'green',
+    'pocari': 'yellow',
+    'gatorade': 'yellow',
 }
 
 
@@ -122,7 +88,6 @@ def get_default_zone_rules():
     return {
         'zones': DEFAULT_ZONES,
         'class_to_zone': CLASS_TO_ZONE,
-        'class_to_place_position': CLASS_TO_PLACE_POSITION,
     }
 
 
@@ -130,7 +95,6 @@ def get_default_zone_rules():
 def judge_workspace(objects, frame: str, zone_rules):
     zones = zone_rules.get('zones', {})
     class_to_zone = zone_rules.get('class_to_zone', {})
-    class_to_place_position = zone_rules.get('class_to_place_position', {})
 
     normal_objects = []
     misplaced_objects = []
@@ -180,7 +144,6 @@ def judge_workspace(objects, frame: str, zone_rules):
                     current_zone_name=current_zone_name,
                     expected_zone_name=expected_zone_name,
                     expected_zone=expected_zone,
-                    place_position=class_to_place_position.get(object_name),
                     frame=frame,
                 )
             )
@@ -249,7 +212,7 @@ def make_normal_object(detected_object, current_zone_name, expected_zone_name, e
 
 # 오배치 물체 정보를 만드는 함수
 # robot_arm_node가 바로 사용할 수 있도록 pick_position과 place_position을 함께 넣습니다.
-def make_misplaced_object(detected_object, current_zone_name, expected_zone_name, expected_zone, place_position, frame):
+def make_misplaced_object(detected_object, current_zone_name, expected_zone_name, expected_zone, frame):
     return {
         'name': detected_object.get('name'),
         'class_id': detected_object.get('class_id'),
@@ -262,14 +225,16 @@ def make_misplaced_object(detected_object, current_zone_name, expected_zone_name
         'position': detected_object.get('position'),
         'pick_position': detected_object.get('position'),
 
+        # 파지 시 그리퍼를 돌릴 물체 각도(base 좌표계, deg). detection의 PCA 결과.
+        'angle': detected_object.get('angle'),
+
         # 현재 구역과 원래 있어야 하는 구역입니다.
         'current_zone': current_zone_name,
         'expected_zone': expected_zone_name,
         'expected_zone_label': expected_zone.get('label'),
 
-        # 이 클래스에 배정된 구역 내 고정 슬롯 좌표입니다. (클래스마다 달라 서로 겹치지 않습니다)
-        # 지금은 camera frame 기준 좌표이고, 실제 로봇 제어 직전 robot base frame으로 변환해야 합니다.
-        'place_position': place_position,
+        # 원래 있어야 하는 zone의 대표 위치입니다. base 좌표계(mm) 기준입니다.
+        'place_position': expected_zone.get('place_position'),
         'place_frame': frame,
 
         'reason': 'outside_expected_zone',

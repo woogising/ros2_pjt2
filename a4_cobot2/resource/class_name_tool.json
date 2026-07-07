@@ -1,7 +1,10 @@
 {
-    "0": "drill", 
-    "1": "hammer", 
-    "2": "pliers", 
-    "3": "screwdriver", 
-    "4": "wrench"
+    "0": "hammer", 
+    "1": "screwdriver", 
+    "2": "green_apple", 
+    "3": "pineapple", 
+    "4": "tape",
+    "5": "bolt",
+    "6": "pocari",
+    "7": "gatorade"     
 }

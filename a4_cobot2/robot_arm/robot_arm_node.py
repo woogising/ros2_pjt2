@@ -4,8 +4,7 @@
 #   - task_manager_node가 보내는 /organize_objects action goal을 받아
 #     오배치 물체 목록을 순서대로 정리하는 로봇팔 실행 노드입니다.
 # 현재 상태:
-#   - pick/place 좌표를 받는 구조는 완성되어 있습니다.
-#   - 실제 pick_and_place 대신 robot_motion.test_small_assist_motion()으로 연결되어 있습니다.
+#   - pick/place 좌표를 받아 robot_motion.pick_and_place_object()로 실제 파지·이동합니다.
 # 안전 관련:
 #   - /emergency_stop을 구독하고, True가 오면 safe_stop_robot()을 호출합니다.
 # ============================================================
@@ -25,6 +24,7 @@ from std_srvs.srv import Trigger
 from od_msg.action import OrganizeObjects
 
 from . import robot_motion
+
 
 # 각 스캔 자세에서 detection이 캡처 완료를 알릴 때까지 기다리는 최대 시간(초)
 SCAN_CAPTURE_TIMEOUT_SEC = 15.0
@@ -295,11 +295,13 @@ class RobotArmNode(Node):
         place_position = misplaced_object.get('place_position')
         place_frame = misplaced_object.get('place_frame', 'unknown_frame')
         expected_zone = misplaced_object.get('expected_zone', 'unknown_zone')
+        object_angle = misplaced_object.get('angle')
 
         self.get_logger().info(f'정리 작업 시작: {object_name}')
         self.get_logger().info(f'pick_position: {pick_position}')
         self.get_logger().info(f'place_position: {place_position}')
         self.get_logger().info(f'expected_zone: {expected_zone}, frame: {place_frame}')
+        self.get_logger().info(f'angle: {object_angle}')
 
         if self.emergency_stop_requested:
             raise RuntimeError('emergency stop requested before robot motion')
@@ -312,21 +314,9 @@ class RobotArmNode(Node):
 
         robot_motion.clear_stop()
 
-        # TODO:
-        # 1. pick_position은 현재 camera frame 기준입니다.
-        # 2. 실제 로봇 제어 전에 camera frame 좌표를 robot base frame 좌표로 변환해야 합니다.
-        # 3. 변환된 pick pose와 place pose를 robot_motion.pick_and_place_object() 같은 함수에 넘기면 됩니다.
-        #
-        # 예시:
-        # success = robot_motion.pick_and_place_object(
-        #     object_name=object_name,
-        #     pick_position_camera=pick_position,
-        #     place_position_camera=place_position,
-        #     frame=place_frame,
-        # )
 
-        # 현재 robot_motion.py에 실제 pick_and_place 함수가 없다면 테스트 동작만 수행합니다.
-        success = robot_motion.test_small_assist_motion(object_name)
+        # 감지된 pick 위치와 zone 대표 place 위치(둘 다 base 좌표계 mm)를 넘겨 실제 파지·이동 수행
+        success = robot_motion.pick_and_place_object(object_name, pick_position, place_position, object_angle)
 
         if not success:
             raise RuntimeError('test motion failed or stopped')

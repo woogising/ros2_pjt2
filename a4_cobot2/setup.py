@@ -23,6 +23,8 @@ setup(
         'notification.*',
         'object_detection',
         'object_detection.*',
+        'database',
+        'database.*',
     ]),
 
     data_files=[
@@ -41,11 +43,11 @@ setup(
             ['resource/.env']
         ),
 
-        # launch 파일이 있으면 나중에 사용
-        # (
-        #     os.path.join('share', package_name, 'launch'),
-        #     glob.glob('launch/*')
-        # ),
+        # launch 파일 설치
+        (
+            os.path.join('share', package_name, 'launch'),
+            glob.glob('launch/*.launch.py')
+        ),
     ],
 
     install_requires=['setuptools'],
@@ -64,6 +66,7 @@ setup(
             'safety_node = safety.safety_node:main',
             'status_notifier_node = notification.status_notifier_node:main',
             'object_detection_node = object_detection.detection:main',
+            'db_node = database.db_node:main',
         ],
     },
 )

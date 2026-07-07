@@ -233,13 +233,6 @@ class TaskManagerNode(Node):
 
         self.publish_safety_command(SAFETY_COMMAND_CLEAR)
 
-        if not self.scan_workspace_client.wait_for_service(timeout_sec=SERVICE_WAIT_TIMEOUT_SEC):
-            self.get_logger().error('scan_workspace 서비스를 찾을 수 없습니다.')
-            self.publish_status(Status.OBJECT_DETECTION_SERVICE_UNAVAILABLE)
-            self.publish_user_notice('작업공간 스캔 서비스를 찾을 수 없습니다.')
-            self.finish_current_task()
-            return
-
         if task_name == Status.TASK_CHECK_WORKSPACE:
             self.publish_status(Status.CHECKING_WORKSPACE)
         else:
@@ -527,7 +520,7 @@ class TaskManagerNode(Node):
             else:
                 self.publish_status(Status.ROBOT_ORGANIZE_FAILED)
                 self.publish_user_notice(
-                    '로봇 정리 작업을 완료하지 못했습니다. 현재는 실제 로봇 제어 함수가 아직 연결되지 않았을 수 있습니다.'
+                    '로봇 정리 작업을 완료하지 못했습니다.'
                 )
 
         except Exception as e:

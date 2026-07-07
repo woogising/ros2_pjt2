@@ -11,6 +11,13 @@ import subprocess
 
 
 class TTS:
+    # spd-say 음성 설정 (원하는 목소리로 바꾸세요)
+    #   VOICE: 'spd-say -L' 목록 중 하나. 예: 'Korean', 'Korean+Annie', 'Korean+Boris'
+    #   RATE : 말 속도 (-100 ~ 100), PITCH: 음높이 (-100 ~ 100)
+    VOICE = 'Korean+Boris'
+    RATE = 50
+    PITCH = 50
+
     # 시스템에 spd-say가 설치되어 있는지 확인하고 TTS 실행 준비를 하는 함수
     def __init__(self):
         self.spd_say_path = shutil.which('spd-say')
@@ -24,7 +31,13 @@ class TTS:
 
         try:
             subprocess.Popen(
-                ['spd-say', text],
+                [
+                    'spd-say',
+                    '-y', self.VOICE,
+                    '-r', str(self.RATE),
+                    '-p', str(self.PITCH),
+                    text,
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )

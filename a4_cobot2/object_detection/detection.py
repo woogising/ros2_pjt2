@@ -16,6 +16,8 @@ from rclpy.node import Node
 
 from ament_index_python.packages import get_package_share_directory
 from std_msgs.msg import Float64MultiArray, Int32, String
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
 
 from od_msg.srv import SrvDepthPosition, ScanWorkspace
 from object_detection.realsense import ImgNode
@@ -27,6 +29,8 @@ from object_detection.detection_utils import (
     pixel_to_camera_coords,
     build_detected_object,
     camera_position_to_base,
+    mask_pca_axis,
+    image_axis_to_base_angle,
     merge_objects_by_name,
     make_scan_workspace_payload,
     make_scan_workspace_error_payload,
@@ -35,6 +39,9 @@ from object_detection.detection_utils import (
 
 PACKAGE_NAME = "a4_cobot2"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
+
+# YOLO 인식 프리뷰 이미지를 발행하는 주기(초). 값을 키우면 추론 부하가 줄어든다.
+DETECTION_PREVIEW_PERIOD_SEC = 1.0
 
 
 class ObjectDetectionNode(Node):
@@ -68,7 +75,29 @@ class ObjectDetectionNode(Node):
         self.scan_done_pub = self.create_publisher(Int32, "/scan_capture_done", 10)
         self.scanned_objects_pub = self.create_publisher(String, "/scanned_objects_base", 10)
 
+        # YOLO 인식 결과(박스/마스크/라벨)를 그린 이미지를 발행해
+        # rqt_image_view 등으로 실시간 확인할 수 있게 한다.
+        self.detection_image_pub = self.create_publisher(Image, "/yolo_detection_image", 10)
+        self.bridge = CvBridge()
+        self.create_timer(DETECTION_PREVIEW_PERIOD_SEC, self.publish_detection_image)
+
         self.get_logger().info("ObjectDetectionNode initialized.")
+
+    # 최신 카메라 프레임에 YOLO 인식 결과를 그려 /yolo_detection_image 로 발행한다.
+    def publish_detection_image(self):
+        rclpy.spin_once(self.img_node, timeout_sec=0.05)  # 최신 컬러 프레임 수신
+        frame = self.img_node.get_color_frame()
+        if frame is None:
+            return
+
+        try:
+            results = self.model.model(frame, verbose=False, retina_masks=True)
+            annotated = results[0].plot()  # 박스/마스크/라벨이 그려진 BGR 이미지
+            self.detection_image_pub.publish(
+                self.bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
+            )
+        except Exception as exc:
+            self.get_logger().warn(f"detection preview 발행 실패: {exc}")
 
     # 모델 이름에 따라 사용할 detection 모델 인스턴스를 반환한다.
     def _load_model(self, name):
@@ -162,8 +191,10 @@ class ObjectDetectionNode(Node):
             # 자세별 base 좌표를 남겨, 같은 물체가 3자세에서 같은 좌표로 나오는지 확인용
             for obj in objects:
                 p = obj["position"]
+                a = obj.get("angle")
+                a_str = f"{a:.1f}" if a is not None else "None"
                 self.get_logger().info(
-                    f"  [자세{index}] {obj['name']}: base=({p['x']:.1f}, {p['y']:.1f}, {p['z']:.1f}) mm"
+                    f"  [자세{index}] {obj['name']}: base=({p['x']:.1f}, {p['y']:.1f}, {p['z']:.1f}) mm, angle={a_str}"
                 )
         except Exception as exc:
             self.get_logger().error(f"scan 자세 {index} 처리 실패: {exc}")
@@ -208,10 +239,29 @@ class ObjectDetectionNode(Node):
             if obj is None:
                 continue
 
+            # segmentation mask로 물체 각도(base 좌표계, deg)를 계산해 붙인다.
+            obj["angle"] = self._compute_base_angle(
+                detection.get("mask"), obj, base_to_camera_matrix
+            )
             obj["position"] = camera_position_to_base(obj["position"], base_to_camera_matrix)
             objects.append(obj)
 
         return objects
+
+    # segmentation mask에서 물체의 base 좌표계 각도(deg)를 계산한다. mask가 없으면 None.
+    def _compute_base_angle(self, mask, obj, base_to_camera_matrix):
+        if mask is None:
+            return None
+
+        axis = mask_pca_axis(mask)
+        if axis is None:
+            return None
+
+        return image_axis_to_base_angle(
+            obj["center"]["x"], obj["center"]["y"],
+            axis[0], axis[1],
+            obj["depth"], self.intrinsics, base_to_camera_matrix,
+        )
 
 
     # # target 물체 이름을 받아 해당 물체의 3D 좌표 [x, y, z]를 반환한다.

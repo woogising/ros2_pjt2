@@ -19,16 +19,32 @@ import DR_init
 from ament_index_python.packages import get_package_share_directory
 from scipy.spatial.transform import Rotation
 
+
+
+
+
+GRIPPER_NAME = "rg2"
+TOOLCHARGER_IP = "192.168.1.1"
+TOOLCHARGER_PORT = "502"
+
+
 # Doosan bringup에서 사용하는 로봇 namespace/model과 맞춰야 합니다.
 ROBOT_ID = 'dsr01'
 ROBOT_MODEL = 'm0609'
 
 # 테스트 모션 속도/가속도입니다. 실제 pick/place 연결 시 물체와 환경에 맞게 낮게 시작하세요.
-VELOCITY = 10
-ACC = 10
+VELOCITY = 50
+ACC = 50
 
-# test_small_assist_motion()에서 현재 TCP를 Z축으로 몇 mm 올릴지 정하는 값입니다.
-TEST_Z_OFFSET_MM = 5.0
+# pick/place 시 물체 바로 위에서 접근/후퇴하기 위한 높이 오프셋(mm)
+APPROACH_Z_OFFSET_MM = 50.0
+
+# pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
+PICK_Z_OFFSET_MM = 0.0
+
+# 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
+# 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
+GRASP_ORIENTATION = [90, 180, 90]
 
 # gripper<-camera 캘리브레이션 행렬(mm 단위). eye-in-hand 카메라 외부 파라미터입니다.
 NPY_PATH = os.path.join(
@@ -51,6 +67,7 @@ SCAN_POSES_DEG = [
 dsr = None
 _node = None
 _emergency = False
+gripper = None
 
 
 # 비상정지 요청 상태로 바꾸는 함수
@@ -93,7 +110,7 @@ def _wrap_motion_guard():
 
 # DSR_ROBOT2 전용 ROS2 노드를 만들고 Doosan 로봇 API를 연결하는 함수
 def connect():
-    global dsr, _node
+    global dsr, _node, gripper
 
     if dsr is not None:
         return dsr
@@ -111,9 +128,10 @@ def connect():
     DR_init.__dsr__node = _node
 
     import DSR_ROBOT2 as dsr_module
+    from robot_arm.onrobot import RG
 
     dsr = dsr_module
-
+    gripper = RG(GRIPPER_NAME, TOOLCHARGER_IP, TOOLCHARGER_PORT)
     _wrap_motion_guard()
 
     try:
@@ -124,34 +142,6 @@ def connect():
 
     _node.get_logger().info('DSR_ROBOT2 연결 완료')
     return dsr
-
-
-# 현재 TCP 위치에서 Z축으로 아주 조금 올라갔다가 다시 내려오는 테스트 모션 함수
-def test_small_assist_motion(object_name='unknown_object'):
-    if dsr is None:
-        raise RuntimeError('robot_motion.connect()가 먼저 호출되지 않았습니다.')
-
-    if _emergency:
-        return False
-
-    current_pose = list(dsr.get_current_posx()[0])
-
-    up_pose = current_pose.copy()
-    up_pose[2] += TEST_Z_OFFSET_MM
-
-    _node.get_logger().info(
-        f'[test_motion] {object_name}: current_z={current_pose[2]:.2f}, '
-        f'target_z={up_pose[2]:.2f}'
-    )
-
-    dsr.movel(up_pose, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
-
-    if _emergency:
-        return False
-
-    dsr.movel(current_pose, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
-
-    return not _emergency
 
 
 # posx [x, y, z, rx, ry, rz](mm, ZYZ deg)를 base<-gripper 4x4 변환 행렬로 만드는 함수
@@ -182,6 +172,94 @@ def move_to_scan_pose(pose_deg):
         return False
 
     dsr.movej(pose_deg, vel=VELOCITY, acc=ACC)
+    return not _emergency
+
+
+# 그리퍼를 여는 함수 (실제 그리퍼 제어 API 연결 필요)
+def grip_open(force=40):
+    gripper.open_gripper(force)
+    pass
+
+
+# 그리퍼를 닫는 함수 (실제 그리퍼 제어 API 연결 필요)
+def grip_close(force=40):
+    gripper.close_gripper(force)
+    pass
+
+
+# 물체를 pick_position에서 집어 place_position으로 옮기는 pick-and-place 함수.
+# pick_position, place_position은 robot base 좌표계(mm) {x, y, z} dict이다.
+def pick_and_place_object(object_name, pick_position, place_position, object_angle):
+    if dsr is None:
+        raise RuntimeError('robot_motion.connect()가 먼저 호출되지 않았습니다.')
+
+    if _emergency:
+        return False
+
+    if pick_position is None or place_position is None:
+        raise ValueError(f'{object_name}의 pick 또는 place 위치가 없습니다.')
+
+    # base 좌표(mm) {x, y, z}에 고정 그리퍼 자세를 붙여 posx 6요소를 만든다.
+    pick_pose = [
+        float(pick_position['x']), float(pick_position['y']), float(pick_position['z'])
+    ] + GRASP_ORIENTATION
+    place_pose = [
+        float(place_position['x']), float(place_position['y']), float(place_position['z'])
+    ] + GRASP_ORIENTATION
+
+    # 감지 z가 살짝 높아 물건 위를 잡을 때, 이 값만큼 더 내려가서 잡는다. (mm)
+    pick_pose[2] -= PICK_Z_OFFSET_MM
+
+    # 물체 바로 위 접근 지점(집기 전/놓기 전 안전 높이)
+    pick_approach = pick_pose.copy()
+    pick_approach[2] += APPROACH_Z_OFFSET_MM
+
+    place_approach = place_pose.copy()
+    place_approach[2] += APPROACH_Z_OFFSET_MM
+
+    _node.get_logger().info(f'[pick_and_place] {object_name} 시작')
+
+    grip_open()
+
+    # ① 물체 위로 접근 (절대, 고정 자세)
+    dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    # ② 접근 위치에서 각도에 맞춰 손목 회전 (툴Z 상대, movel=동기)
+    if object_angle is not None:
+
+        rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
+        dsr.amovel([0, 0, 0, 0, 0, rot], vel=VELOCITY, acc=ACC, ref=dsr.DR_TOOL)
+
+        if _emergency:
+            return False
+
+    # ③ 상대로 하강 (회전 유지) — 툴Z로 접근높이만큼 내려감
+    dsr.movel([0, 0, APPROACH_Z_OFFSET_MM, 0, 0, 0], vel=VELOCITY - 20, acc=ACC - 20, ref=dsr.DR_TOOL)
+    if _emergency:
+        return False
+
+    grip_close()
+    dsr.wait(1.0)
+    # 들어 올린 뒤 목표 위치 위로 이동 → 내려놓기
+    dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    dsr.movel(place_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    dsr.movel(place_pose, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    grip_open()
+
+    # 안전 높이로 복귀
+    dsr.movel(place_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+
     return not _emergency
 
 
