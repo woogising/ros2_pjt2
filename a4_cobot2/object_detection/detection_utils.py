@@ -137,6 +137,45 @@ def build_detected_object(detection, depth_frame, intrinsics):
     }
 
 
+# 카메라 좌표계(m) position을 base<-camera 4x4 행렬로 base 좌표계(mm) position으로 변환한다.
+# camera position은 m, 로봇 posx와 캘리브레이션 행렬은 mm 단위라 1000을 곱해 맞춘다.
+def camera_position_to_base(position, base_to_camera_matrix):
+    camera_point = np.array([
+        float(position["x"]) * 1000.0,
+        float(position["y"]) * 1000.0,
+        float(position["z"]) * 1000.0,
+        1.0,
+    ])
+    base_point = base_to_camera_matrix @ camera_point
+    return {
+        "x": float(base_point[0]),
+        "y": float(base_point[1]),
+        "z": float(base_point[2]),
+    }
+
+
+# 여러 관측 자세에서 감지된 같은 이름 물체들을 base 좌표 평균으로 하나로 합친다.
+# (물체는 클래스당 1개라는 전제이므로 이름이 같으면 같은 물체로 본다.)
+def merge_objects_by_name(objects):
+    groups = {}
+    for obj in objects:
+        groups.setdefault(obj["name"], []).append(obj)
+
+    merged = []
+    for group in groups.values():
+        best = max(group, key=lambda o: o.get("confidence", 0.0))
+        merged_object = dict(best)
+        merged_object["position"] = {
+            "x": sum(o["position"]["x"] for o in group) / len(group),
+            "y": sum(o["position"]["y"] for o in group) / len(group),
+            "z": sum(o["position"]["z"] for o in group) / len(group),
+        }
+        merged_object["detected_pose_count"] = len(group)
+        merged.append(merged_object)
+
+    return merged
+
+
 # scan_workspace 성공 응답용 payload를 생성한다.
 def make_scan_workspace_payload(objects, skipped_count, raw_detection_count):
     return {

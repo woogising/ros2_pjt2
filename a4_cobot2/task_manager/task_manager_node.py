@@ -18,6 +18,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from od_msg.srv import SrvDepthPosition, JudgeWorkspace, ScanWorkspace
 from od_msg.action import OrganizeObjects
@@ -72,6 +73,13 @@ class TaskManagerNode(Node):
         # 요청: target_names_json
         # 응답: detected_objects_json
         self.scan_workspace_client = self.create_client(ScanWorkspace, SERVICE_SCAN_WORKSPACE)
+
+        # RobotArmNode가 3자세 스캔을 수행하도록 시작시키는 서비스 client입니다.
+        # 스캔 결과(감지된 base 좌표 물체 목록)는 /scanned_objects_base 토픽으로 되돌아옵니다.
+        self.start_scan_client = self.create_client(Trigger, '/start_workspace_scan')
+        self.scanned_objects_sub = self.create_subscription(
+            String, '/scanned_objects_base', self.scanned_objects_callback, 10
+        )
 
         # WorkspaceJudgeNode의 /judge_workspace 서비스를 호출하는 client입니다.
         # /scan_workspace 결과를 넘겨 normal/misplaced/unknown_rule 목록을 받습니다.
@@ -251,13 +259,53 @@ class TaskManagerNode(Node):
             self.get_logger().warn('현재 작업이 작업공간 감지 흐름이 아니므로 scan_workspace 요청을 중단합니다.')
             return
 
-        request = ScanWorkspace.Request()
-        request.target_names_json = make_scan_workspace_request_json(self.target_objects)
+        if not self.start_scan_client.wait_for_service(timeout_sec=SERVICE_WAIT_TIMEOUT_SEC):
+            self.get_logger().error('/start_workspace_scan 서비스를 찾을 수 없습니다.')
+            self.publish_status(Status.OBJECT_DETECTION_SERVICE_UNAVAILABLE)
+            self.finish_current_task()
+            return
 
-        self.get_logger().info(f'ObjectDetectionNode에 작업공간 전체 스캔 요청: {request.target_names_json}')
+        self.get_logger().info('RobotArmNode에 3자세 작업공간 스캔 시작을 요청합니다.')
 
-        future = self.scan_workspace_client.call_async(request)
-        future.add_done_callback(self.scan_workspace_response_callback)
+        future = self.start_scan_client.call_async(Trigger.Request())
+        future.add_done_callback(self.start_scan_response_callback)
+
+    # 스캔 시작 요청(서비스) 응답을 확인하는 함수. 실제 감지 결과는 /scanned_objects_base 토픽으로 들어온다.
+    def start_scan_response_callback(self, future):
+        try:
+            response = future.result()
+            if not response.success:
+                self.get_logger().error(f'스캔 시작 실패: {response.message}')
+                self.publish_status(Status.OBJECT_DETECTION_SERVICE_UNAVAILABLE)
+                self.publish_user_notice('작업공간 스캔을 시작하지 못했습니다.')
+                self.finish_current_task()
+        except Exception as e:
+            self.get_logger().error(f'스캔 시작 응답 처리 중 오류: {e}')
+            self.finish_current_task()
+
+    # RobotArmNode 3자세 스캔이 끝나면 detection이 보낸 base 좌표 물체 목록을 받아 판단 단계로 넘기는 함수
+    def scanned_objects_callback(self, msg: String):
+        if self.stop_requested or not self.is_workspace_detection_task():
+            self.get_logger().warn('stop 요청 또는 작업 변경으로 스캔 결과 처리를 중단합니다.')
+            return
+
+        try:
+            scan_payload = parse_json_payload(msg.data)
+            self.detected_objects = scan_payload.get('objects', [])
+            self.detected_objects_frame = scan_payload.get('frame', 'base')
+
+            summary = scan_payload.get('summary', {})
+            self.get_logger().info(
+                f'3자세 스캔 결과 수신: detected={summary.get("detected_count")}, '
+                f'raw={summary.get("raw_detection_count")}'
+            )
+
+            self.finish_check_workspace_detection()
+
+        except Exception as e:
+            self.get_logger().error(f'스캔 결과 처리 중 오류: {e}')
+            self.publish_status(Status.WORKSPACE_JUDGEMENT_RESPONSE_ERROR)
+            self.finish_current_task()
 
 
     # scan_workspace 서비스 응답을 받아 감지된 전체 물체 목록을 저장하고 workspace 판단 단계로 넘기는 함수

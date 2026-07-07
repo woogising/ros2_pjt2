@@ -11,8 +11,13 @@
 
 # robot_motion.py
 
+import os
+
+import numpy as np
 import rclpy
 import DR_init
+from ament_index_python.packages import get_package_share_directory
+from scipy.spatial.transform import Rotation
 
 # Doosan bringup에서 사용하는 로봇 namespace/model과 맞춰야 합니다.
 ROBOT_ID = 'dsr01'
@@ -24,6 +29,18 @@ ACC = 10
 
 # test_small_assist_motion()에서 현재 TCP를 Z축으로 몇 mm 올릴지 정하는 값입니다.
 TEST_Z_OFFSET_MM = 5.0
+
+# gripper<-camera 캘리브레이션 행렬(mm 단위). eye-in-hand 카메라 외부 파라미터입니다.
+NPY_PATH = os.path.join(
+    get_package_share_directory('a4_cobot2'), 'resource', 'T_gripper2camera.npy'
+)
+
+# 작업공간을 나눠 찍는 3개 관측 자세(joint, degree): [중앙, 왼쪽, 오른쪽]
+SCAN_POSES_DEG = [
+    [3.86, 30.35, 38.15, -0.07, 111.245, -88.86],
+    [3.9, 30.69, 37.61, -0.14, 126.49, -88.94],
+    [3.86, 30.35, 38.15, -0.07, 91.71, -87.99],
+]
 
 # dsr:
 #   import DSR_ROBOT2 as dsr_module 한 뒤 저장되는 모듈 객체입니다.
@@ -134,6 +151,37 @@ def test_small_assist_motion(object_name='unknown_object'):
 
     dsr.movel(current_pose, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
 
+    return not _emergency
+
+
+# posx [x, y, z, rx, ry, rz](mm, ZYZ deg)를 base<-gripper 4x4 변환 행렬로 만드는 함수
+def get_robot_pose_matrix(x, y, z, rx, ry, rz):
+    rotation = Rotation.from_euler('ZYZ', [rx, ry, rz], degrees=True).as_matrix()
+    matrix = np.eye(4)
+    matrix[:3, :3] = rotation
+    matrix[:3, 3] = [x, y, z]
+    return matrix
+
+
+# 현재 로봇 자세에서 base<-camera 4x4 변환 행렬을 계산하는 함수
+def get_base_to_camera_matrix():
+    if dsr is None:
+        raise RuntimeError('robot_motion.connect()가 먼저 호출되지 않았습니다.')
+
+    gripper2cam = np.load(NPY_PATH)
+    base2gripper = get_robot_pose_matrix(*dsr.get_current_posx()[0])
+    return base2gripper @ gripper2cam
+
+
+# 지정한 관측 자세(joint, degree)로 이동하는 함수
+def move_to_scan_pose(pose_deg):
+    if dsr is None:
+        raise RuntimeError('robot_motion.connect()가 먼저 호출되지 않았습니다.')
+
+    if _emergency:
+        return False
+
+    dsr.movej(pose_deg, vel=VELOCITY, acc=ACC)
     return not _emergency
 
 

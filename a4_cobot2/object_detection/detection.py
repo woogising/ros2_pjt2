@@ -15,6 +15,8 @@ import rclpy
 from rclpy.node import Node
 
 from ament_index_python.packages import get_package_share_directory
+from std_msgs.msg import Float64MultiArray, Int32, String
+
 from od_msg.srv import SrvDepthPosition, ScanWorkspace
 from object_detection.realsense import ImgNode
 from object_detection.yolo import YoloModel
@@ -24,6 +26,8 @@ from object_detection.detection_utils import (
     get_depth_from_frame,
     pixel_to_camera_coords,
     build_detected_object,
+    camera_position_to_base,
+    merge_objects_by_name,
     make_scan_workspace_payload,
     make_scan_workspace_error_payload,
 )
@@ -52,6 +56,17 @@ class ObjectDetectionNode(Node):
         # self.create_service(SrvDepthPosition, "get_3d_position", self.handle_get_depth)
 
         self.create_service(ScanWorkspace, "scan_workspace", self.handle_scan_workspace)
+
+        # 3자세 스캔 흐름:
+        #   robot_arm이 각 관측 자세에서 base<-camera 변환 행렬을 /scan_pose_transform으로 보내면
+        #   이 노드가 그 순간 물체를 감지해 base 좌표로 변환하고 누적한다.
+        #   마지막 자세까지 끝나면 병합 결과를 /scanned_objects_base로 task_manager에 보낸다.
+        self.scan_accumulator = []
+        self.scan_pose_sub = self.create_subscription(
+            Float64MultiArray, "/scan_pose_transform", self.handle_scan_pose, 10
+        )
+        self.scan_done_pub = self.create_publisher(Int32, "/scan_capture_done", 10)
+        self.scanned_objects_pub = self.create_publisher(String, "/scanned_objects_base", 10)
 
         self.get_logger().info("ObjectDetectionNode initialized.")
 
@@ -119,6 +134,84 @@ class ObjectDetectionNode(Node):
             response.message = f"scan_workspace failed: {exc}"
 
             return response
+
+    # robot_arm이 관측 자세에서 보낸 base<-camera 변환 행렬을 받아,
+    # 그 자세에서 물체를 감지하고 base 좌표로 변환해 누적하는 함수
+    def handle_scan_pose(self, msg):
+        data = list(msg.data)
+
+        if len(data) < 18:
+            self.get_logger().error(f"scan_pose_transform 데이터 길이 오류: {len(data)}")
+            return
+
+        index = int(data[0])
+        total = int(data[1])
+        base_to_camera_matrix = np.array(data[2:18]).reshape(4, 4)
+
+        self.get_logger().info(f"scan 자세 {index + 1}/{total} 물체 감지 시작")
+
+        if index == 0:
+            self.scan_accumulator = []
+
+        try:
+            objects = self._scan_and_transform(base_to_camera_matrix)
+            self.scan_accumulator.extend(objects)
+            self.get_logger().info(
+                f"scan 자세 {index}: {len(objects)}개 감지 (누적 {len(self.scan_accumulator)})"
+            )
+            # 자세별 base 좌표를 남겨, 같은 물체가 3자세에서 같은 좌표로 나오는지 확인용
+            for obj in objects:
+                p = obj["position"]
+                self.get_logger().info(
+                    f"  [자세{index}] {obj['name']}: base=({p['x']:.1f}, {p['y']:.1f}, {p['z']:.1f}) mm"
+                )
+        except Exception as exc:
+            self.get_logger().error(f"scan 자세 {index} 처리 실패: {exc}")
+
+        # 이 자세 캡처가 끝났음을 robot_arm에 알려 다음 자세로 이동시킨다.
+        self.scan_done_pub.publish(Int32(data=index))
+
+        # 마지막 자세까지 끝나면 같은 이름 물체를 병합해 task_manager로 보낸다.
+        if index >= total - 1:
+            merged = merge_objects_by_name(self.scan_accumulator)
+            payload = make_scan_workspace_payload(
+                objects=merged,
+                skipped_count=0,
+                raw_detection_count=len(self.scan_accumulator),
+            )
+            payload["frame"] = "base"
+
+            message = String()
+            message.data = json.dumps(payload, ensure_ascii=False)
+            self.scanned_objects_pub.publish(message)
+
+            self.get_logger().info(
+                f"3자세 스캔 완료: 병합 {len(merged)}개 물체를 task_manager로 전송"
+            )
+
+    # 현재 카메라 프레임에서 물체를 감지해 base 좌표계 object 목록으로 변환하는 함수
+    def _scan_and_transform(self, base_to_camera_matrix):
+        detections = self.model.get_all_detections(self.img_node)
+
+        depth_frame = self._wait_for_valid_data(
+            self.img_node.get_depth_frame,
+            "depth frame",
+        )
+
+        objects = []
+        for detection in detections:
+            obj = build_detected_object(
+                detection=detection,
+                depth_frame=depth_frame,
+                intrinsics=self.intrinsics,
+            )
+            if obj is None:
+                continue
+
+            obj["position"] = camera_position_to_base(obj["position"], base_to_camera_matrix)
+            objects.append(obj)
+
+        return objects
 
 
     # # target 물체 이름을 받아 해당 물체의 3D 좌표 [x, y, z]를 반환한다.

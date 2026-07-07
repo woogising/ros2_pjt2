@@ -10,6 +10,8 @@
 #   - /emergency_stop을 구독하고, True가 오면 safe_stop_robot()을 호출합니다.
 # ============================================================
 import json
+import threading
+
 import rclpy
 
 from rclpy.node import Node
@@ -18,10 +20,14 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64MultiArray, Int32
+from std_srvs.srv import Trigger
 from od_msg.action import OrganizeObjects
 
 from . import robot_motion
+
+# 각 스캔 자세에서 detection이 캡처 완료를 알릴 때까지 기다리는 최대 시간(초)
+SCAN_CAPTURE_TIMEOUT_SEC = 15.0
 
 class RobotArmNode(Node):
     # robot_arm_node를 초기화하고 정리 실행 action server와 emergency_stop 구독자를 준비하는 함수
@@ -76,6 +82,23 @@ class RobotArmNode(Node):
         #   /emergency_stop topic의 최신 상태입니다.
         #   True이면 새 action goal을 거절하고, 진행 중인 작업도 중단합니다.
         self.emergency_stop_requested = False
+
+        # 3자세 스캔 흐름 (robot_arm이 주도):
+        #   /start_workspace_scan 서비스를 받으면 3개 관측 자세로 순서대로 이동하며
+        #   각 자세에서 base<-camera 변환 행렬을 /scan_pose_transform으로 발행한다.
+        #   ObjectDetectionNode가 감지를 끝내고 /scan_capture_done ack를 보내면 다음 자세로 이동한다.
+        self.scan_pose_pub = self.create_publisher(Float64MultiArray, '/scan_pose_transform', 10)
+        self.scan_done_sub = self.create_subscription(
+            Int32, '/scan_capture_done', self.scan_done_callback, 10,
+            callback_group=self.callback_group
+        )
+        self.start_scan_srv = self.create_service(
+            Trigger, '/start_workspace_scan', self.handle_start_scan,
+            callback_group=self.callback_group
+        )
+        # detection의 자세별 캡처 완료 ack를 기다리기 위한 이벤트
+        self._scan_ack_event = threading.Event()
+        self._scan_ack_index = -1
 
         self.get_logger().info('RobotArmNode started.')
         self.get_logger().info('/organize_objects action server ready.')
@@ -341,6 +364,63 @@ class RobotArmNode(Node):
         except Exception as e:
             self.get_logger().error(f'safe_stop_robot 처리 중 오류 발생: {e}')
 
+    # detection이 특정 자세 캡처를 끝냈다는 ack를 받아 대기 중인 스캔 루프를 깨우는 함수
+    def scan_done_callback(self, msg):
+        self._scan_ack_index = msg.data
+        self._scan_ack_event.set()
+
+    # task_manager의 스캔 시작 요청을 받아 3자세 스캔 시퀀스를 수행하는 서비스 콜백
+    def handle_start_scan(self, request, response):
+        if not self.robot_motion_connected:
+            response.success = False
+            response.message = 'robot_motion이 연결되지 않아 스캔을 시작할 수 없습니다.'
+            return response
+
+        if self.emergency_stop_requested:
+            response.success = False
+            response.message = 'emergency stop 상태라 스캔을 시작할 수 없습니다.'
+            return response
+
+        try:
+            self.run_scan_sequence()
+            response.success = True
+            response.message = 'workspace scan sequence finished'
+        except Exception as e:
+            self.get_logger().error(f'스캔 시퀀스 실패: {e}')
+            response.success = False
+            response.message = str(e)
+
+        return response
+
+    # 3개 관측 자세를 순서대로 이동하며 각 자세에서 detection이 감지하도록 트리거하는 함수
+    def run_scan_sequence(self):
+        robot_motion.clear_stop()
+
+        poses = robot_motion.SCAN_POSES_DEG
+        total = len(poses)
+
+        for index, pose in enumerate(poses):
+            if self.emergency_stop_requested:
+                raise RuntimeError('emergency stop requested during scan sequence')
+
+            self.get_logger().info(f'스캔 자세 {index + 1}/{total}로 이동합니다.')
+            robot_motion.move_to_scan_pose(pose)
+
+            # 이동을 마친 현재 자세에서 base<-camera 변환 행렬을 계산해 발행한다.
+            matrix = robot_motion.get_base_to_camera_matrix()
+
+            self._scan_ack_event.clear()
+
+            message = Float64MultiArray()
+            message.data = [float(index), float(total)] + [float(v) for v in matrix.flatten()]
+            self.scan_pose_pub.publish(message)
+
+            # detection이 이 자세 감지를 끝낼 때까지 대기한다. (그 뒤 다음 자세로 이동)
+            if not self._scan_ack_event.wait(timeout=SCAN_CAPTURE_TIMEOUT_SEC):
+                raise RuntimeError(f'스캔 자세 {index} 감지 응답 시간 초과')
+
+        self.get_logger().info('3자세 스캔 시퀀스를 완료했습니다.')
+
 
 # ROS2 robot_arm_node를 실행하고 action/service/subscriber callback을 병렬 처리하는 메인 함수
 def main(args=None):
@@ -348,7 +428,7 @@ def main(args=None):
 
     node = RobotArmNode()
 
-    executor = MultiThreadedExecutor(num_threads=2)
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
 
     try:

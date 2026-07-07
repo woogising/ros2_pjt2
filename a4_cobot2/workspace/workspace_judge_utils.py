@@ -98,11 +98,31 @@ CLASS_TO_ZONE = {
 }
 
 
+# 클래스별로 물체를 놓을 정확한 좌표(슬롯)를 지정합니다.
+# 같은 zone에 여러 클래스가 매핑돼도 서로 겹치지 않도록, zone을 나눈 서로 다른 좌표를 줍니다.
+# 각 좌표는 그 클래스의 expected zone 범위 안에 있어야 합니다.
+# 주의: 아래 좌표는 임시값입니다. 실제 /scan_workspace 결과로 보정해야 합니다.
+# x/y는 camera_color_optical_frame 기준이며, 로봇 제어 직전 base frame으로 변환해야 합니다.
+CLASS_TO_PLACE_POSITION = {
+    # right_top (x 0.0~0.45, y -0.35~0.0)을 좌/우로 나눠 배정
+    'hammer': {'x': 0.1125, 'y': -0.175, 'z': 0.45},
+    'screwdriver': {'x': 0.3375, 'y': -0.175, 'z': 0.45},
+
+    # right_bottom (x 0.0~0.45, y 0.0~0.35)을 좌/우로 나눠 배정
+    'wrench': {'x': 0.1125, 'y': 0.175, 'z': 0.45},
+    'pliers': {'x': 0.3375, 'y': 0.175, 'z': 0.45},
+
+    # left_bottom (x -0.45~0.0, y 0.0~0.35) — drill 하나뿐이라 중앙
+    'drill': {'x': -0.225, 'y': 0.175, 'z': 0.45},
+}
+
+
 # 기본 작업공간 배치 규칙을 반환하는 함수
 def get_default_zone_rules():
     return {
         'zones': DEFAULT_ZONES,
         'class_to_zone': CLASS_TO_ZONE,
+        'class_to_place_position': CLASS_TO_PLACE_POSITION,
     }
 
 
@@ -110,6 +130,7 @@ def get_default_zone_rules():
 def judge_workspace(objects, frame: str, zone_rules):
     zones = zone_rules.get('zones', {})
     class_to_zone = zone_rules.get('class_to_zone', {})
+    class_to_place_position = zone_rules.get('class_to_place_position', {})
 
     normal_objects = []
     misplaced_objects = []
@@ -159,6 +180,7 @@ def judge_workspace(objects, frame: str, zone_rules):
                     current_zone_name=current_zone_name,
                     expected_zone_name=expected_zone_name,
                     expected_zone=expected_zone,
+                    place_position=class_to_place_position.get(object_name),
                     frame=frame,
                 )
             )
@@ -227,7 +249,7 @@ def make_normal_object(detected_object, current_zone_name, expected_zone_name, e
 
 # 오배치 물체 정보를 만드는 함수
 # robot_arm_node가 바로 사용할 수 있도록 pick_position과 place_position을 함께 넣습니다.
-def make_misplaced_object(detected_object, current_zone_name, expected_zone_name, expected_zone, frame):
+def make_misplaced_object(detected_object, current_zone_name, expected_zone_name, expected_zone, place_position, frame):
     return {
         'name': detected_object.get('name'),
         'class_id': detected_object.get('class_id'),
@@ -245,9 +267,9 @@ def make_misplaced_object(detected_object, current_zone_name, expected_zone_name
         'expected_zone': expected_zone_name,
         'expected_zone_label': expected_zone.get('label'),
 
-        # 원래 있어야 하는 구역의 대표 좌표입니다.
+        # 이 클래스에 배정된 구역 내 고정 슬롯 좌표입니다. (클래스마다 달라 서로 겹치지 않습니다)
         # 지금은 camera frame 기준 좌표이고, 실제 로봇 제어 직전 robot base frame으로 변환해야 합니다.
-        'place_position': expected_zone.get('place_position'),
+        'place_position': place_position,
         'place_frame': frame,
 
         'reason': 'outside_expected_zone',
