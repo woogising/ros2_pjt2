@@ -24,16 +24,13 @@ from object_detection.realsense import ImgNode
 from object_detection.yolo import YoloModel
 from object_detection.detection_utils import (
     parse_target_names_json,
-    get_box_center,
-    get_depth_from_frame,
-    pixel_to_camera_coords,
     build_detected_object,
-    camera_position_to_base,
-    mask_pca_axis,
-    image_axis_to_base_angle,
-    merge_objects_by_name,
     make_scan_workspace_payload,
     make_scan_workspace_error_payload,
+    deproject_mask_to_base,
+    merge_clouds_by_name,
+    compute_top_center_grasp,
+    top_face_angle,
 )
 
 
@@ -165,7 +162,7 @@ class ObjectDetectionNode(Node):
             return response
 
     # robot_arm이 관측 자세에서 보낸 base<-camera 변환 행렬을 받아,
-    # 그 자세에서 물체를 감지하고 base 좌표로 변환해 누적하는 함수
+    # 그 자세에서 물체 mask를 base 포인트클라우드로 만들어 누적하는 함수
     def handle_scan_pose(self, msg):
         data = list(msg.data)
 
@@ -188,13 +185,11 @@ class ObjectDetectionNode(Node):
             self.get_logger().info(
                 f"scan 자세 {index}: {len(objects)}개 감지 (누적 {len(self.scan_accumulator)})"
             )
-            # 자세별 base 좌표를 남겨, 같은 물체가 3자세에서 같은 좌표로 나오는지 확인용
             for obj in objects:
-                p = obj["position"]
-                a = obj.get("angle")
-                a_str = f"{a:.1f}" if a is not None else "None"
+                centroid = obj["cloud"].mean(axis=0)
                 self.get_logger().info(
-                    f"  [자세{index}] {obj['name']}: base=({p['x']:.1f}, {p['y']:.1f}, {p['z']:.1f}) mm, angle={a_str}"
+                    f"  [자세{index}] {obj['name']}: {len(obj['cloud'])}pts, "
+                    f"centroid=({centroid[0]:.1f}, {centroid[1]:.1f}, {centroid[2]:.1f}) mm"
                 )
         except Exception as exc:
             self.get_logger().error(f"scan 자세 {index} 처리 실패: {exc}")
@@ -202,11 +197,11 @@ class ObjectDetectionNode(Node):
         # 이 자세 캡처가 끝났음을 robot_arm에 알려 다음 자세로 이동시킨다.
         self.scan_done_pub.publish(Int32(data=index))
 
-        # 마지막 자세까지 끝나면 같은 이름 물체를 병합해 task_manager로 보낸다.
+        # 마지막 자세까지 끝나면 클라우드 병합 → 윗면 중심 grasp 계산 후 발행.
         if index >= total - 1:
-            merged = merge_objects_by_name(self.scan_accumulator)
+            result_objects = self._build_grasp_objects(self.scan_accumulator)
             payload = make_scan_workspace_payload(
-                objects=merged,
+                objects=result_objects,
                 skipped_count=0,
                 raw_detection_count=len(self.scan_accumulator),
             )
@@ -217,10 +212,10 @@ class ObjectDetectionNode(Node):
             self.scanned_objects_pub.publish(message)
 
             self.get_logger().info(
-                f"3자세 스캔 완료: 병합 {len(merged)}개 물체를 task_manager로 전송"
+                f"3자세 스캔 완료: {len(result_objects)}개 물체를 task_manager로 전송"
             )
 
-    # 현재 카메라 프레임에서 물체를 감지해 base 좌표계 object 목록으로 변환하는 함수
+    # 한 자세에서 감지된 물체마다 mask 전체를 base 포인트클라우드로 만들어 반환한다.
     def _scan_and_transform(self, base_to_camera_matrix):
         detections = self.model.get_all_detections(self.img_node)
 
@@ -231,37 +226,55 @@ class ObjectDetectionNode(Node):
 
         objects = []
         for detection in detections:
-            obj = build_detected_object(
-                detection=detection,
-                depth_frame=depth_frame,
-                intrinsics=self.intrinsics,
-            )
-            if obj is None:
+            mask = detection.get("mask")
+            if mask is None:
                 continue
 
-            # segmentation mask로 물체 각도(base 좌표계, deg)를 계산해 붙인다.
-            obj["angle"] = self._compute_base_angle(
-                detection.get("mask"), obj, base_to_camera_matrix
+            cloud = deproject_mask_to_base(
+                mask, depth_frame, self.intrinsics, base_to_camera_matrix
             )
-            obj["position"] = camera_position_to_base(obj["position"], base_to_camera_matrix)
-            objects.append(obj)
+            if cloud is None or len(cloud) < 10:
+                continue
+
+            objects.append({
+                "name": detection.get("name"),
+                "class_id": detection.get("class_id"),
+                "confidence": detection.get("confidence"),
+                "box": detection.get("box"),
+                "cloud": cloud,  # (N,3) base mm — 내부 누적용 (JSON엔 안 들어감)
+            })
 
         return objects
 
-    # segmentation mask에서 물체의 base 좌표계 각도(deg)를 계산한다. mask가 없으면 None.
-    def _compute_base_angle(self, mask, obj, base_to_camera_matrix):
-        if mask is None:
-            return None
+    # 누적된 자세별 클라우드를 이름 기준 병합 → 윗면 중심 grasp 좌표/각도를 계산한다.
+    def _build_grasp_objects(self, accumulator):
+        merged = merge_clouds_by_name(accumulator)
 
-        axis = mask_pca_axis(mask)
-        if axis is None:
-            return None
+        result = []
+        for name, item in merged.items():
+            try:
+                (gx, gy, gz), top_ds = compute_top_center_grasp(item["cloud"])
+                angle = top_face_angle(top_ds)
+            except Exception as exc:
+                self.get_logger().error(f"{name} grasp 계산 실패: {exc}")
+                continue
 
-        return image_axis_to_base_angle(
-            obj["center"]["x"], obj["center"]["y"],
-            axis[0], axis[1],
-            obj["depth"], self.intrinsics, base_to_camera_matrix,
-        )
+            result.append({
+                "name": name,
+                "class_id": item["class_id"],
+                "confidence": item["confidence"],
+                "box": item["box"],
+                "position": {"x": gx, "y": gy, "z": gz},
+                "angle": angle,
+                "detected_pose_count": item["count"],
+            })
+
+            angle_str = f"{angle:.1f}" if angle is not None else "None"
+            self.get_logger().info(
+                f"  [grasp] {name}: pos=({gx:.1f}, {gy:.1f}, {gz:.1f}) mm, angle={angle_str}"
+            )
+
+        return result
 
 
     # # target 물체 이름을 받아 해당 물체의 3D 좌표 [x, y, z]를 반환한다.

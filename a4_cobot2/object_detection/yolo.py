@@ -141,7 +141,7 @@ class YoloModel:
         converted.sort(key=lambda x: x["confidence"], reverse=True)
         return converted
 
-    def _aggregate_detections(self, results, confidence_threshold=0.5, iou_threshold=0.5):
+    def _aggregate_detections(self, results, confidence_threshold=0.8, iou_threshold=0.5):
         """
         Fuse raw detection boxes across frames using IoU-based grouping
         and majority voting for robust final detections.

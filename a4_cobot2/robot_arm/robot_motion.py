@@ -40,7 +40,7 @@ ACC = 50
 APPROACH_Z_OFFSET_MM = 50.0
 
 # pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
-PICK_Z_OFFSET_MM = 0.0
+PICK_Z_OFFSET_MM = 30.0
 
 # 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
 # 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
@@ -170,19 +170,19 @@ def move_to_scan_pose(pose_deg):
 
     if _emergency:
         return False
-
+    grip_open()
     dsr.movej(pose_deg, vel=VELOCITY, acc=ACC)
     return not _emergency
 
 
 # 그리퍼를 여는 함수 (실제 그리퍼 제어 API 연결 필요)
-def grip_open(force=40):
+def grip_open(force=200):
     gripper.open_gripper(force)
     pass
 
 
 # 그리퍼를 닫는 함수 (실제 그리퍼 제어 API 연결 필요)
-def grip_close(force=40):
+def grip_close(force=200):
     gripper.close_gripper(force)
     pass
 
@@ -204,7 +204,7 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
         float(pick_position['x']), float(pick_position['y']), float(pick_position['z'])
     ] + GRASP_ORIENTATION
     place_pose = [
-        float(place_position['x']), float(place_position['y']), float(place_position['z'])
+        float(place_position['x']), float(place_position['y']), float(pick_position['z'])
     ] + GRASP_ORIENTATION
 
     # 감지 z가 살짝 높아 물건 위를 잡을 때, 이 값만큼 더 내려가서 잡는다. (mm)
@@ -241,7 +241,7 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
         return False
 
     grip_close()
-    dsr.wait(1.0)
+    dsr.wait(2.0)
     # 들어 올린 뒤 목표 위치 위로 이동 → 내려놓기
     dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
     if _emergency:
