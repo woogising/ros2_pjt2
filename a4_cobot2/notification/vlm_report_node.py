@@ -182,18 +182,25 @@ class VLMReportNode(Node):
             response.message = 'fallback report generated'
             return response
 
-        if self.latest_raw_frame is None and self.latest_annotated_frame is None:
+        available_scan_image_count = self.count_available_scan_images(request_payload)
+        has_latest_topic_image = (
+            self.latest_raw_frame is not None or
+            self.latest_annotated_frame is not None
+        )
+
+        if available_scan_image_count == 0 and not has_latest_topic_image:
             response.success = True
             response.report_text = fallback_notice
             response.report_json = json.dumps(
                 {
                     'source': 'fallback',
-                    'reason': 'no_image_received',
+                    'reason': 'no_scan_or_latest_image_received',
                     'model': self.model,
+                    'available_scan_image_count': available_scan_image_count,
                 },
                 ensure_ascii=False,
             )
-            response.message = 'no image received, fallback report generated'
+            response.message = 'no scan/latest image received, fallback report generated'
             return response
 
         try:
@@ -205,8 +212,11 @@ class VLMReportNode(Node):
                 {
                     'source': 'vlm',
                     'model': self.model,
-                    'used_raw_image': self.latest_raw_frame is not None,
-                    'used_annotated_image': self.latest_annotated_frame is not None,
+                    'available_scan_image_count': available_scan_image_count,
+                    'used_scan_images': available_scan_image_count > 0,
+                    'used_latest_topic_images_as_fallback': available_scan_image_count == 0,
+                    'used_latest_raw_image': self.latest_raw_frame is not None,
+                    'used_latest_annotated_image': self.latest_annotated_frame is not None,
                 },
                 ensure_ascii=False,
             )
@@ -262,26 +272,45 @@ class VLMReportNode(Node):
 
         return '정리 후 작업공간 상태를 정확히 판단하지 못했습니다. 확인이 필요합니다.'
 
-    # OpenAI VLM에 보낼 최종 보고 프롬프트를 만드는 함수
+    # OpenAI VLM에 보낼 최종 재검증 보고 프롬프트를 만드는 함수
     def build_prompt(self, request_payload: Dict[str, Any], fallback_notice: str) -> str:
+        scan_images = request_payload.get('scan_images', [])
+        scan_image_summary = []
+
+        if isinstance(scan_images, list):
+            for item in scan_images:
+                if not isinstance(item, dict):
+                    continue
+
+                scan_image_summary.append({
+                    'index': item.get('index'),
+                    'total': item.get('total'),
+                    'scan_mode': item.get('scan_mode'),
+                    'has_raw_image': bool(item.get('raw_image_path')),
+                    'has_annotated_image': bool(item.get('annotated_image_path')),
+                })
+
         compact_payload = {
-            'report_mode': request_payload.get('report_mode', 'final_recheck_report'),
+            'report_mode': request_payload.get('report_mode', 'final_recheck_visual_check'),
             'detected_objects': request_payload.get('detected_objects', []),
+            'detected_objects_frame': request_payload.get('detected_objects_frame'),
             'judgement_payload': request_payload.get('judgement_payload', {}),
+            'scan_image_summary': scan_image_summary,
             'zone_rules': self.zone_rules,
             'fallback_notice': fallback_notice,
         }
 
         return f"""
-너는 협동로봇 작업공간 정리 시스템의 최종 보고 담당자다.
+너는 협동로봇 작업공간 정리 시스템의 재검증 이미지 기반 최종 보고 담당자다.
 
 중요한 원칙:
 1. 로봇의 공식 판단은 JSON의 judgement_payload를 우선한다.
-2. 이미지는 보조 확인용이다. 이미지와 JSON이 다르면 확정적으로 단정하지 말고 "시각적으로는 확인이 필요합니다"처럼 말한다.
-3. 로봇 동작 좌표, 픽셀 좌표, 내부 JSON 키 이름은 사용자에게 자세히 말하지 않는다.
-4. 한국어로 짧고 자연스럽게 보고한다.
-5. 사용자가 듣는 TTS 문장이므로 2~4문장 정도로 말한다.
-6. 안전 문제나 불확실성이 있으면 마지막 문장에 확인 필요성을 말한다.
+2. 함께 제공되는 이미지는 로봇 정리 후 최종 재검증 3자세에서 실제로 촬영된 작업공간 이미지다.
+3. 이미지에서 JSON 판단과 명확히 모순되는 점이 보이면 단정하지 말고 "시각적으로는 추가 확인이 필요합니다"처럼 말한다.
+4. 로봇 동작 좌표, 픽셀 좌표, 내부 JSON 키 이름, 이미지 파일 경로는 사용자에게 말하지 않는다.
+5. 한국어로 짧고 자연스럽게 보고한다.
+6. 사용자가 듣는 TTS 문장이므로 2~4문장 정도로 말한다.
+7. 안전 문제, 가림, 겹침, 경계선 근처 배치처럼 불확실성이 있으면 마지막 문장에 확인 필요성을 말한다.
 
 입력 데이터:
 {json.dumps(compact_payload, ensure_ascii=False, indent=2)}
@@ -317,7 +346,94 @@ class VLMReportNode(Node):
         image_b64 = base64.b64encode(encoded.tobytes()).decode('utf-8')
         return f'data:image/jpeg;base64,{image_b64}'
 
-    # 최신 이미지와 JSON payload를 이용해 VLM 최종 보고문을 생성하는 함수
+    # 이미지 파일 경로를 읽어 OpenAI API에 넣을 base64 data URL로 변환하는 함수
+    def image_path_to_data_url(self, image_path: str) -> Optional[str]:
+        if image_path is None or str(image_path).strip() == '':
+            return None
+
+        if not os.path.exists(image_path):
+            self.get_logger().warn(f'VLM 입력 이미지 파일이 없습니다: {image_path}')
+            return None
+
+        frame = cv2.imread(image_path)
+        if frame is None:
+            self.get_logger().warn(f'VLM 입력 이미지 파일을 읽지 못했습니다: {image_path}')
+            return None
+
+        return self.frame_to_data_url(frame)
+
+    # request_payload 안의 scan_images 중 실제 읽을 수 있는 이미지 개수를 세는 함수
+    def count_available_scan_images(self, request_payload: Dict[str, Any]) -> int:
+        count = 0
+
+        scan_images = request_payload.get('scan_images', [])
+        if not isinstance(scan_images, list):
+            return 0
+
+        for item in scan_images:
+            if not isinstance(item, dict):
+                continue
+
+            raw_path = item.get('raw_image_path')
+            annotated_path = item.get('annotated_image_path')
+
+            if raw_path and os.path.exists(raw_path):
+                count += 1
+
+            if annotated_path and os.path.exists(annotated_path):
+                count += 1
+
+        return count
+
+    # scan_images에 들어있는 최종 재검증 자세별 이미지를 VLM 입력 content에 추가하는 함수
+    def append_scan_images_to_user_content(self, user_content: list, request_payload: Dict[str, Any]) -> int:
+        used_count = 0
+
+        scan_images = request_payload.get('scan_images', [])
+        if not isinstance(scan_images, list):
+            return 0
+
+        for item in scan_images:
+            if not isinstance(item, dict):
+                continue
+
+            index = item.get('index')
+            total = item.get('total')
+            pose_number = int(index) + 1 if index is not None else used_count + 1
+
+            raw_url = self.image_path_to_data_url(item.get('raw_image_path'))
+            if raw_url is not None:
+                user_content.append({
+                    'type': 'text',
+                    'text': f'최종 재검증 자세 {pose_number}/{total} 원본 이미지입니다.',
+                })
+                user_content.append({
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': raw_url,
+                        'detail': 'low',
+                    },
+                })
+                used_count += 1
+
+            annotated_url = self.image_path_to_data_url(item.get('annotated_image_path'))
+            if annotated_url is not None:
+                user_content.append({
+                    'type': 'text',
+                    'text': f'최종 재검증 자세 {pose_number}/{total} YOLO 표시 이미지입니다.',
+                })
+                user_content.append({
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': annotated_url,
+                        'detail': 'low',
+                    },
+                })
+                used_count += 1
+
+        return used_count
+
+    # 최종 재검증 3자세 이미지와 JSON payload를 이용해 VLM 최종 보고문을 생성하는 함수
     def generate_vlm_report(self, request_payload: Dict[str, Any], fallback_notice: str) -> str:
         prompt = self.build_prompt(request_payload, fallback_notice)
 
@@ -328,30 +444,44 @@ class VLMReportNode(Node):
             }
         ]
 
-        raw_image_url = self.frame_to_data_url(self.latest_raw_frame)
-        annotated_image_url = self.frame_to_data_url(self.latest_annotated_frame)
+        # 1순위:
+        #   ObjectDetectionNode가 최종 재검증 3자세에서 실제 저장한 이미지들을 사용합니다.
+        used_scan_image_count = self.append_scan_images_to_user_content(
+            user_content=user_content,
+            request_payload=request_payload,
+        )
 
-        if raw_image_url is not None:
-            user_content.append(
-                {
+        # 2순위 fallback:
+        #   scan_images가 없거나 파일을 읽을 수 없을 때만 최신 topic 이미지를 사용합니다.
+        if used_scan_image_count == 0:
+            raw_image_url = self.frame_to_data_url(self.latest_raw_frame)
+            annotated_image_url = self.frame_to_data_url(self.latest_annotated_frame)
+
+            if raw_image_url is not None:
+                user_content.append({
+                    'type': 'text',
+                    'text': '최종 재검증 이미지 파일을 사용할 수 없어 최신 원본 카메라 이미지를 대신 사용합니다.',
+                })
+                user_content.append({
                     'type': 'image_url',
                     'image_url': {
                         'url': raw_image_url,
                         'detail': 'low',
                     },
-                }
-            )
+                })
 
-        if annotated_image_url is not None:
-            user_content.append(
-                {
+            if annotated_image_url is not None:
+                user_content.append({
+                    'type': 'text',
+                    'text': '최종 재검증 이미지 파일을 사용할 수 없어 최신 YOLO 표시 이미지를 대신 사용합니다.',
+                })
+                user_content.append({
                     'type': 'image_url',
                     'image_url': {
                         'url': annotated_image_url,
                         'detail': 'low',
                     },
-                }
-            )
+                })
 
         completion = self.client.chat.completions.create(
             model=self.model,
@@ -361,7 +491,8 @@ class VLMReportNode(Node):
                 {
                     'role': 'system',
                     'content': (
-                        '너는 로봇 작업공간 정리 결과를 사용자에게 짧고 정확하게 보고하는 한국어 안내자다.'
+                        '너는 로봇 작업공간 정리 결과를 최종 재검증 이미지와 판단 JSON을 바탕으로 '
+                        '사용자에게 짧고 정확하게 보고하는 한국어 안내자다.'
                     ),
                 },
                 {

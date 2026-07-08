@@ -28,6 +28,9 @@ TOPIC_TASK_STATUS = '/task_status'
 TOPIC_SAFETY_COMMAND = '/safety_command'
 TOPIC_USER_NOTICE = '/user_notice'
 
+# ObjectDetectionNode에게 이번 3자세 스캔이 최초 확인인지 재검증인지 알려주는 topic
+TOPIC_WORKSPACE_SCAN_MODE = '/workspace_scan_mode'
+
 # Service 이름
 SERVICE_GET_3D_POSITION = 'get_3d_position' # get_3d_position은 디버깅용 또는 pick 직전 재확인용으로 남겨둘 수 있음
 SERVICE_SCAN_WORKSPACE = 'scan_workspace' # 작업공간 전체를 한 번에 스캔하는 ObjectDetectionNode 서비스
@@ -45,4 +48,6 @@ ACTION_WAIT_TIMEOUT_SEC = 2.0
 SERVICE_GENERATE_FINAL_REPORT = '/generate_final_report'
 
 # OpenAI API 호출은 일반 ROS service보다 시간이 걸릴 수 있으므로 별도 timeout을 둡니다.
-VLM_REPORT_WAIT_TIMEOUT_SEC = 2.0 # LM_REPORT_WAIT_TIMEOUT_SEC는 service server가 있는지 확인하는 timeout이야. OpenAI 응답 대기 시간은 vlm_report_node.py의 openai_timeout_sec 파라미터가 담당
+# VLM_REPORT_WAIT_TIMEOUT_SEC는 service server가 있는지 확인하는 timeout입니다.
+# OpenAI 응답 대기 시간은 vlm_report_node.py의 openai_timeout_sec 파라미터가 담당합니다.
+VLM_REPORT_WAIT_TIMEOUT_SEC = 2.0

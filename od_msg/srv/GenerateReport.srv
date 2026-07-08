@@ -1,0 +1,6 @@
+string report_request_json
+---
+bool success
+string report_text
+string report_json
+string message

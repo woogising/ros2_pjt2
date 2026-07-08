@@ -13,6 +13,7 @@ __pycache__/
 **/.env.*
 *.key
 *.pem
+*.pt
 
 !.env.example
 

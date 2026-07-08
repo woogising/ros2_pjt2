@@ -16,6 +16,7 @@ import json
 import rclpy
 
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy, DurabilityPolicy
 from rclpy.action import ActionClient
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
@@ -38,6 +39,7 @@ from task_manager.task_config import (
     TOPIC_TASK_COMMAND,
     TOPIC_TASK_STATUS,
     TOPIC_USER_NOTICE,
+    TOPIC_WORKSPACE_SCAN_MODE,
 )
 from task_manager.payload_utils import (
     is_valid_position,
@@ -99,6 +101,21 @@ class TaskManagerNode(Node):
 
         self.user_notice_pub = self.create_publisher(String, TOPIC_USER_NOTICE, 10)
 
+        self.workspace_scan_mode_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        # ObjectDetectionNode에게 이번 3자세 스캔이 최초 확인인지 재검증인지 알려주는 publisher입니다.
+        # ObjectDetectionNode는 이 값을 보고 recheck_workspace일 때만 scan_images를 저장합니다.
+        self.workspace_scan_mode_pub = self.create_publisher(
+            String,
+            TOPIC_WORKSPACE_SCAN_MODE,
+            self.workspace_scan_mode_qos,
+        )
+
         # -------------------------
         # TaskManager 내부 상태 변수
         # -------------------------
@@ -132,6 +149,11 @@ class TaskManagerNode(Node):
         #   detected_objects의 position이 어떤 좌표계 기준인지 저장합니다.
         #   현재 기본값은 camera_color_optical_frame입니다.
         self.detected_objects_frame = None
+
+        # scan_images:
+        #   ObjectDetectionNode가 최종 재검증 3자세 스캔 중 저장한 이미지 경로 목록입니다.
+        #   최초 확인 스캔에서는 비어 있고, 최종 VLM 보고 때만 사용합니다.
+        self.scan_images = []
 
         # latest_workspace_judgement:
         #   가장 최근의 workspace 판단 결과를 저장합니다.
@@ -203,6 +225,14 @@ class TaskManagerNode(Node):
         self.safety_command_pub.publish(msg)
         self.get_logger().info(f'Published /safety_command: {command}')
 
+    # ObjectDetectionNode에게 현재 3자세 스캔의 목적을 알려주는 함수
+    def publish_workspace_scan_mode(self, mode: str):
+        msg = String()
+        msg.data = mode
+
+        self.workspace_scan_mode_pub.publish(msg)
+        self.get_logger().info(f'Published /workspace_scan_mode: {mode}')
+
     # 작업공간 확인 명령을 받았을 때 ObjectDetectionNode에 물체 위치 요청을 시작하는 함수
     def handle_check_workspace(self):
         if self.is_busy:
@@ -226,7 +256,12 @@ class TaskManagerNode(Node):
         self.current_target_index = 0
         self.detected_objects = []
         self.detected_objects_frame = None
+        self.scan_images = []
         self.stop_requested = False
+
+        # 이번 3자세 스캔이 최초 확인인지 재검증인지 ObjectDetectionNode에 알려줍니다.
+        # check_workspace에서는 이미지를 저장하지 않고, recheck_workspace에서만 최종 보고용 이미지를 저장합니다.
+        self.publish_workspace_scan_mode(task_name)
 
         if task_name == Status.TASK_CHECK_WORKSPACE:
             self.latest_workspace_judgement = None
@@ -292,11 +327,13 @@ class TaskManagerNode(Node):
             scan_payload = parse_json_payload(msg.data)
             self.detected_objects = scan_payload.get('objects', [])
             self.detected_objects_frame = scan_payload.get('frame', 'base')
+            self.scan_images = scan_payload.get('scan_images', [])
 
             summary = scan_payload.get('summary', {})
             self.get_logger().info(
                 f'3자세 스캔 결과 수신: detected={summary.get("detected_count")}, '
-                f'raw={summary.get("raw_detection_count")}'
+                f'raw={summary.get("raw_detection_count")}, '
+                f'scan_images={len(self.scan_images)}'
             )
 
             self.finish_check_workspace_detection()
@@ -326,6 +363,7 @@ class TaskManagerNode(Node):
             scan_payload = parse_json_payload(response.detected_objects_json)
             self.detected_objects = scan_payload.get('objects', [])
             self.detected_objects_frame = scan_payload.get('frame', 'camera_color_optical_frame')
+            self.scan_images = scan_payload.get('scan_images', [])
 
             summary = scan_payload.get('summary', {})
             self.get_logger().info(
@@ -707,10 +745,11 @@ class TaskManagerNode(Node):
             return
 
         request_payload = {
-            'report_mode': 'final_recheck_report',
+            'report_mode': 'final_recheck_visual_check',
             'detected_objects': self.detected_objects,
             'detected_objects_frame': self.detected_objects_frame,
             'judgement_payload': judgement_payload,
+            'scan_images': self.scan_images,
             'fallback_notice': fallback_notice,
         }
 
