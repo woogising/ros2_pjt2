@@ -20,7 +20,7 @@ from rclpy.action import ActionClient
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from od_msg.srv import SrvDepthPosition, JudgeWorkspace, ScanWorkspace
+from od_msg.srv import SrvDepthPosition, JudgeWorkspace, ScanWorkspace, GenerateReport
 from od_msg.action import OrganizeObjects
 
 from task_manager import status_codes as Status
@@ -30,7 +30,9 @@ from task_manager.task_config import (
     SERVICE_GET_3D_POSITION,
     SERVICE_SCAN_WORKSPACE,
     SERVICE_JUDGE_WORKSPACE,
+    SERVICE_GENERATE_FINAL_REPORT,
     SERVICE_WAIT_TIMEOUT_SEC,
+    VLM_REPORT_WAIT_TIMEOUT_SEC,
     TARGET_OBJECTS,
     TOPIC_SAFETY_COMMAND,
     TOPIC_TASK_COMMAND,
@@ -84,6 +86,10 @@ class TaskManagerNode(Node):
         # WorkspaceJudgeNode의 /judge_workspace 서비스를 호출하는 client입니다.
         # /scan_workspace 결과를 넘겨 normal/misplaced/unknown_rule 목록을 받습니다.
         self.judge_workspace_client = self.create_client(JudgeWorkspace, SERVICE_JUDGE_WORKSPACE)
+
+        # VLMReportNode의 /generate_final_report 서비스를 호출하기 위한 client입니다.
+        # 정리 후 재검증 결과를 사용자에게 자연어로 최종 보고할 때 사용합니다.
+        self.generate_final_report_client = self.create_client(GenerateReport, SERVICE_GENERATE_FINAL_REPORT)
 
         # RobotArmNode의 /organize_objects action server에 정리 대상 목록을 보냅니다.
         # service가 아니라 action인 이유: 여러 물체를 순서대로 정리하면서 feedback/cancel/result가 필요하기 때문입니다.
@@ -671,25 +677,81 @@ class TaskManagerNode(Node):
 
         if result == 'all_clear':
             self.publish_status(Status.RECHECK_ALL_CLEAR)
-            self.publish_user_notice('정리가 완료되었습니다. 모든 물건이 지정된 구역에 배치되었습니다.')
+            fallback_notice = '정리가 완료되었습니다. 모든 물건이 지정된 구역에 배치되었습니다.'
 
         elif result == 'misplaced_found':
             self.publish_status(Status.RECHECK_MISPLACED_REMAINING)
-
-            notice = make_recheck_remaining_notice(judgement_payload)
-            self.publish_user_notice(notice)
+            fallback_notice = make_recheck_remaining_notice(judgement_payload)
 
         elif result == 'unknown_rule_found':
             self.publish_status(Status.RECHECK_UNKNOWN_RULE_FOUND)
-            self.publish_user_notice('정리 후 재검증을 했지만 일부 물체의 배치 규칙을 찾을 수 없습니다. 확인이 필요합니다.')
+            fallback_notice = '정리 후 재검증을 했지만 일부 물체의 배치 규칙을 찾을 수 없습니다. 확인이 필요합니다.'
 
         elif result == 'no_objects':
             self.publish_status(Status.RECHECK_NO_OBJECTS_DETECTED)
-            self.publish_user_notice('재검증 중 감지된 물체가 없습니다. 카메라 시야 또는 작업공간을 확인해주세요.')
+            fallback_notice = '재검증 중 감지된 물체가 없습니다. 카메라 시야 또는 작업공간을 확인해주세요.'
 
         else:
             self.publish_status(Status.RECHECK_UNKNOWN_RESULT)
-            self.publish_user_notice('정리 후 작업공간 상태를 정확히 판단하지 못했습니다. 확인이 필요합니다.')
+            fallback_notice = '정리 후 작업공간 상태를 정확히 판단하지 못했습니다. 확인이 필요합니다.'
+
+        self.request_vlm_final_report(
+            judgement_payload=judgement_payload,
+            fallback_notice=fallback_notice)
+
+    # VLMReportNode에 최종 보고문 생성을 요청하는 함수
+    def request_vlm_final_report(self, judgement_payload, fallback_notice: str):
+        if not self.generate_final_report_client.wait_for_service(timeout_sec=VLM_REPORT_WAIT_TIMEOUT_SEC):
+            self.get_logger().warn('/generate_final_report 서비스를 찾을 수 없어 기존 보고문을 사용합니다.')
+            self.publish_user_notice(fallback_notice)
+            return
+
+        request_payload = {
+            'report_mode': 'final_recheck_report',
+            'detected_objects': self.detected_objects,
+            'detected_objects_frame': self.detected_objects_frame,
+            'judgement_payload': judgement_payload,
+            'fallback_notice': fallback_notice,
+        }
+
+        request = GenerateReport.Request()
+        request.report_request_json = json.dumps(request_payload, ensure_ascii=False)
+
+        self.get_logger().info(f'VLMReportNode에 최종 보고문 생성을 요청합니다: {request.report_request_json}')
+
+        future = self.generate_final_report_client.call_async(request)
+        future.add_done_callback(
+            lambda future_result, fallback=fallback_notice:
+                self.vlm_final_report_response_callback(
+                    future_result,
+                    fallback,
+                )
+        )
+
+
+    # VLMReportNode의 최종 보고문 응답을 받아 /user_notice로 발행하는 함수
+    def vlm_final_report_response_callback(self, future, fallback_notice: str):
+        try:
+            response = future.result()
+
+            if not response.success:
+                self.get_logger().warn(f'VLM 최종 보고문 생성 실패: {response.message}')
+                self.publish_user_notice(fallback_notice)
+                return
+
+            report_text = response.report_text.strip()
+
+            if report_text == '':
+                self.get_logger().warn('VLM 최종 보고문이 비어 있어 기존 보고문을 사용합니다.')
+                self.publish_user_notice(fallback_notice)
+                return
+
+            self.get_logger().info(f'VLM 최종 보고문 생성 결과: {response.report_json}')
+            self.publish_user_notice(report_text)
+
+        except Exception as e:
+            self.get_logger().error(f'VLM 최종 보고문 응답 처리 중 오류 발생: {e}')
+            self.publish_user_notice(fallback_notice)
 
 
 # ROS2 task_manager_node를 실행하고 콜백을 계속 처리하는 메인 함수

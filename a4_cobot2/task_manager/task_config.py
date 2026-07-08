@@ -39,3 +39,10 @@ ACTION_ORGANIZE_OBJECTS = '/organize_objects'
 # Service/action server 대기 시간입니다.
 SERVICE_WAIT_TIMEOUT_SEC = 2.0
 ACTION_WAIT_TIMEOUT_SEC = 2.0
+
+# =============================== VLM ===============================
+# VLMReportNode가 최종 사용자 보고문을 생성하는 service
+SERVICE_GENERATE_FINAL_REPORT = '/generate_final_report'
+
+# OpenAI API 호출은 일반 ROS service보다 시간이 걸릴 수 있으므로 별도 timeout을 둡니다.
+VLM_REPORT_WAIT_TIMEOUT_SEC = 2.0 # LM_REPORT_WAIT_TIMEOUT_SEC는 service server가 있는지 확인하는 timeout이야. OpenAI 응답 대기 시간은 vlm_report_node.py의 openai_timeout_sec 파라미터가 담당

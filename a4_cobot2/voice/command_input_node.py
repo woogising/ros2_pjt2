@@ -19,7 +19,7 @@ from std_msgs.msg import String
 from voice.MicController import MicController, MicConfig
 from voice.wakeup_word import WakeupWord
 from voice.stt import STT
-from voice.tts3 import TTS
+from voice.tts import TTS
 from voice.command_classifier import CommandClassifier
 
 

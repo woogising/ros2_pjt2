@@ -65,6 +65,7 @@ setup(
             'robot_arm_node = robot_arm.robot_arm_node:main',
             'safety_node = safety.safety_node:main',
             'status_notifier_node = notification.status_notifier_node:main',
+            'vlm_report_node = notification.vlm_report_node:main',
             'object_detection_node = object_detection.detection_grasp:main',
             'db_node = database.db_node:main',
         ],
