@@ -69,6 +69,8 @@ setup(
             'status_notifier_node = notification.status_notifier_node:main',
             'vlm_report_node = notification.vlm_report_node:main',
             'object_detection_node = object_detection.detection:main',
+            'hmi_interface_node = hmi.hmi_interface:main',
+            'db_node = database.db_node:main',
         ],
     },
 )

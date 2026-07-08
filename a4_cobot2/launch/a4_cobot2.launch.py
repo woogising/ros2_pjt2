@@ -29,6 +29,7 @@ def generate_launch_description():
         'status_notifier_node',
         'command_input_node',
         'db_node',
+        'hmi_interface_node',
     ]
 
     nodes = [

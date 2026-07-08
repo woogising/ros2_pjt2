@@ -43,6 +43,7 @@ from PyQt5.QtWidgets import (
     QHeaderView,
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap
 
 from hmi.hmi_ros_bridge import HmiRosBridge
 
@@ -361,6 +362,7 @@ class SortingRobotHMI(QWidget):
         button_layout = QHBoxLayout()
         replay_btn = QPushButton("REPLAY VOICE")
         self.mute_btn = QPushButton("VOICE OFF")
+        self.mute_btn.setEnabled(False)  # 실제 TTS 제어 미연결 → 비활성화(무시)
 
         button_layout.addWidget(replay_btn)
         button_layout.addWidget(self.mute_btn)
@@ -389,6 +391,7 @@ class SortingRobotHMI(QWidget):
         recheck_btn = QPushButton("RECHECK")
         stop_btn = QPushButton("EMERGENCY STOP")
         reset_btn = QPushButton("RESET")
+        reset_btn.setEnabled(False)  # ROS2 reset 명령 미연결 → 비활성화(무시)
 
         stop_btn.setObjectName("StopButton")
 
@@ -448,9 +451,21 @@ class SortingRobotHMI(QWidget):
         self.ros_bridge.task_status_signal.connect(self.on_task_status_received)
         self.ros_bridge.user_notice_signal.connect(self.on_user_notice_received)
         self.ros_bridge.safety_state_signal.connect(self.on_safety_state_received)
+        self.ros_bridge.detection_image_signal.connect(self.on_detection_image_received)
         self.ros_bridge.log_signal.connect(self.add_log)
 
         self.ros_bridge.start()
+
+    # object_detection_node의 YOLO 인식 이미지를 camera_view에 표시하는 슬롯
+    def on_detection_image_received(self, qimage):
+        pixmap = QPixmap.fromImage(qimage)
+        self.camera_view.setPixmap(
+            pixmap.scaled(
+                self.camera_view.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
 
     def add_log(self, text):
         self.log_box.append(f"> {text}")

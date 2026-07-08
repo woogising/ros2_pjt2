@@ -40,7 +40,7 @@ ACC = 50
 APPROACH_Z_OFFSET_MM = 50.0
 
 # pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
-PICK_Z_OFFSET_MM = 50.0
+PICK_Z_OFFSET_MM = 40.0
 
 # 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
 # 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
@@ -244,6 +244,12 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
     ] + GRASP_ORIENTATION
 
     # 감지 z가 살짝 높아 물건 위를 잡을 때, 이 값만큼 더 내려가서 잡는다. (mm)
+    
+    if pick_pose[2] > 60.00:
+        PICK_Z_OFFSET_MM = 45.00
+    else: 
+        PICK_Z_OFFSET_MM = 30.00
+    
     pick_pose[2] -= PICK_Z_OFFSET_MM
 
     # 물체 바로 위 접근 지점(집기 전/놓기 전 안전 높이)
