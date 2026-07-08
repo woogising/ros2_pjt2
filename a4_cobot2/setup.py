@@ -24,7 +24,9 @@ setup(
         'object_detection',
         'object_detection.*',
         'database',
-        'database.*',
+        'database.*',        
+        'hmi',
+        'hmi.*',
     ]),
 
     data_files=[
@@ -67,7 +69,6 @@ setup(
             'status_notifier_node = notification.status_notifier_node:main',
             'vlm_report_node = notification.vlm_report_node:main',
             'object_detection_node = object_detection.detection:main',
-            'db_node = database.db_node:main',
         ],
     },
 )
