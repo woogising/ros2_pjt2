@@ -10,9 +10,14 @@
 #   - get_3d_position은 주석 처리되어 있고, 전체 스캔은 scan_workspace 중심입니다.
 # ============================================================
 import json
+import os
+import time
+
+import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy, DurabilityPolicy
 
 from ament_index_python.packages import get_package_share_directory
 from std_msgs.msg import Float64MultiArray, Int32, String
@@ -66,6 +71,40 @@ class ObjectDetectionNode(Node):
         #   이 노드가 그 순간 물체를 감지해 base 좌표로 변환하고 누적한다.
         #   마지막 자세까지 끝나면 병합 결과를 /scanned_objects_base로 task_manager에 보낸다.
         self.scan_accumulator = []
+
+        # current_scan_mode:
+        #   TaskManagerNode가 /workspace_scan_mode로 알려주는 현재 스캔 목적입니다.
+        #   check_workspace: 최초 확인 스캔
+        #   recheck_workspace: 로봇 정리 후 최종 재검증 스캔
+        self.current_scan_mode = "check_workspace"
+
+        # scan_image_records:
+        #   최종 재검증 3자세 스캔 중 실제로 저장한 이미지 경로 목록입니다.
+        #   최초 확인 스캔에서는 비어 있고, 마지막 재검증 payload에만 포함됩니다.
+        self.scan_image_records = []
+        self.scan_session_id = None
+
+        # scan_image_dir:
+        #   사용자가 확인하기 쉽도록 가능하면 source tree의 notification/scan_images에 저장합니다.
+        self.declare_parameter("scan_image_dir", "")
+        scan_image_dir_param = self.get_parameter("scan_image_dir").get_parameter_value().string_value
+        self.scan_image_dir = self._resolve_scan_image_dir(scan_image_dir_param)
+        os.makedirs(self.scan_image_dir, exist_ok=True)
+
+        self.scan_mode_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
+        self.scan_mode_sub = self.create_subscription(
+            String,
+            "/workspace_scan_mode",
+            self.workspace_scan_mode_callback,
+            self.scan_mode_qos,
+        )
+
         self.scan_pose_sub = self.create_subscription(
             Float64MultiArray, "/scan_pose_transform", self.handle_scan_pose, 10
         )
@@ -95,6 +134,45 @@ class ObjectDetectionNode(Node):
             )
         except Exception as exc:
             self.get_logger().warn(f"detection preview 발행 실패: {exc}")
+
+    # scan image 저장 경로를 결정하는 함수
+    def _resolve_scan_image_dir(self, scan_image_dir_param: str) -> str:
+        if scan_image_dir_param is not None and scan_image_dir_param.strip() != "":
+            return os.path.abspath(os.path.expanduser(scan_image_dir_param.strip()))
+
+        env_dir = os.getenv("A4_COBOT2_SCAN_IMAGE_DIR", "").strip()
+        if env_dir != "":
+            return os.path.abspath(os.path.expanduser(env_dir))
+
+        # 사용자의 현재 workspace 구조를 우선 사용합니다.
+        preferred_candidates = [
+            os.path.expanduser("~/a4_cobot2_ws/src/a4_cobot2/notification/scan_images"),
+            os.path.join(os.getcwd(), "src", "a4_cobot2", "notification", "scan_images"),
+        ]
+
+        for candidate in preferred_candidates:
+            parent = os.path.dirname(candidate)
+            if os.path.isdir(parent):
+                return candidate
+
+        # fallback: 현재 Python package 위치 기준 notification/scan_images
+        package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(package_root, "notification", "scan_images")
+
+    # TaskManagerNode가 알려준 현재 스캔 목적을 저장하는 함수
+    def workspace_scan_mode_callback(self, msg: String):
+        mode = msg.data.strip()
+
+        if mode not in ["check_workspace", "recheck_workspace"]:
+            self.get_logger().warn(f"알 수 없는 workspace scan mode: {mode}")
+            return
+
+        self.current_scan_mode = mode
+        self.get_logger().info(f"workspace scan mode updated: {self.current_scan_mode}")
+
+    # 현재 스캔이 로봇 정리 후 최종 재검증 스캔인지 판단하는 함수
+    def should_save_scan_images(self) -> bool:
+        return self.current_scan_mode == "recheck_workspace"
 
     # 모델 이름에 따라 사용할 detection 모델 인스턴스를 반환한다.
     def _load_model(self, name):
@@ -178,12 +256,30 @@ class ObjectDetectionNode(Node):
 
         if index == 0:
             self.scan_accumulator = []
+            self.scan_image_records = []
+
+            if self.should_save_scan_images():
+                self.scan_session_id = time.strftime("recheck_%Y%m%d_%H%M%S")
+                self.get_logger().info(
+                    f"최종 재검증 스캔 이미지 저장을 시작합니다: {self.scan_image_dir}"
+                )
+            else:
+                self.scan_session_id = None
+                self.get_logger().info("최초 확인 스캔이므로 scan_images를 저장하지 않습니다.")
 
         try:
             objects = self._scan_and_transform(base_to_camera_matrix)
             self.scan_accumulator.extend(objects)
+
+            if self.should_save_scan_images():
+                image_record = self.save_scan_pose_images(index=index, total=total)
+                if image_record is not None:
+                    self.scan_image_records.append(image_record)
+
             self.get_logger().info(
-                f"scan 자세 {index}: {len(objects)}개 감지 (누적 {len(self.scan_accumulator)})"
+                f"scan 자세 {index}: {len(objects)}개 감지 "
+                f"(누적 {len(self.scan_accumulator)}), "
+                f"scan_images={len(self.scan_image_records)}"
             )
             for obj in objects:
                 centroid = obj["cloud"].mean(axis=0)
@@ -206,6 +302,8 @@ class ObjectDetectionNode(Node):
                 raw_detection_count=len(self.scan_accumulator),
             )
             payload["frame"] = "base"
+            payload["scan_mode"] = self.current_scan_mode
+            payload["scan_images"] = self.scan_image_records if self.should_save_scan_images() else []
 
             message = String()
             message.data = json.dumps(payload, ensure_ascii=False)
@@ -214,6 +312,56 @@ class ObjectDetectionNode(Node):
             self.get_logger().info(
                 f"3자세 스캔 완료: {len(result_objects)}개 물체를 task_manager로 전송"
             )
+
+    # 현재 scan 자세에서 실제 카메라가 본 원본 이미지와 YOLO 표시 이미지를 notification/scan_images에 저장하는 함수
+    def save_scan_pose_images(self, index: int, total: int):
+        rclpy.spin_once(self.img_node, timeout_sec=0.05)
+
+        frame = self.img_node.get_color_frame()
+        if frame is None:
+            self.get_logger().warn(f"scan 자세 {index + 1}/{total} 이미지 저장 실패: color frame 없음")
+            return None
+
+        if self.scan_session_id is None:
+            self.scan_session_id = time.strftime("recheck_%Y%m%d_%H%M%S")
+
+        base_name = f"{self.scan_session_id}_pose_{index + 1}_of_{total}"
+        raw_image_path = os.path.join(self.scan_image_dir, f"{base_name}_raw.jpg")
+        annotated_image_path = os.path.join(self.scan_image_dir, f"{base_name}_annotated.jpg")
+
+        try:
+            cv2.imwrite(raw_image_path, frame)
+
+            annotated_saved = False
+            try:
+                results = self.model.model(frame, verbose=False, retina_masks=True)
+                annotated = results[0].plot()
+                cv2.imwrite(annotated_image_path, annotated)
+                annotated_saved = True
+
+            except Exception as exc:
+                annotated_image_path = ""
+                self.get_logger().warn(
+                    f"scan 자세 {index + 1}/{total} annotated 이미지 저장 실패: {exc}"
+                )
+
+            record = {
+                "index": int(index),
+                "total": int(total),
+                "scan_mode": self.current_scan_mode,
+                "raw_image_path": raw_image_path,
+                "annotated_image_path": annotated_image_path if annotated_saved else "",
+            }
+
+            self.get_logger().info(
+                f"scan 자세 {index + 1}/{total} 이미지 저장 완료: {record}"
+            )
+
+            return record
+
+        except Exception as exc:
+            self.get_logger().warn(f"scan 자세 {index + 1}/{total} 이미지 저장 실패: {exc}")
+            return None
 
     # 한 자세에서 감지된 물체마다 mask 전체를 base 포인트클라우드로 만들어 반환한다.
     def _scan_and_transform(self, base_to_camera_matrix):

@@ -23,7 +23,7 @@ import numpy as np
 PACKAGE_NAME = "a4_cobot2"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 
-YOLO_MODEL_FILENAME = "yolo_seg_best_v1.pt"
+YOLO_MODEL_FILENAME = "yolo_seg_best_v2.pt"
 YOLO_CLASS_NAME_JSON = "class_name_tool.json"
 
 YOLO_MODEL_PATH = os.path.join(PACKAGE_PATH, "resource", YOLO_MODEL_FILENAME)
