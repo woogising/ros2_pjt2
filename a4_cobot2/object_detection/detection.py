@@ -38,7 +38,7 @@ PACKAGE_NAME = "a4_cobot2"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 
 # YOLO 인식 프리뷰 이미지를 발행하는 주기(초). 값을 키우면 추론 부하가 줄어든다.
-DETECTION_PREVIEW_PERIOD_SEC = 1.0
+DETECTION_PREVIEW_PERIOD_SEC = 3.0
 
 
 class ObjectDetectionNode(Node):

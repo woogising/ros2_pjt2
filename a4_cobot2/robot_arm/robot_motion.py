@@ -40,7 +40,7 @@ ACC = 50
 APPROACH_Z_OFFSET_MM = 50.0
 
 # pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
-PICK_Z_OFFSET_MM = 30.0
+PICK_Z_OFFSET_MM = 50.0
 
 # 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
 # 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
@@ -187,6 +187,42 @@ def grip_close(force=200):
     pass
 
 
+def force_down():  # 힘 제어 하강 함수
+    if _emergency:  # 비상정지 중에는 force control을 새로 걸지 않는다
+        return
+
+    force_info = dsr.get_tool_force()
+    # 목표 위치로 이동
+    _node.get_logger().info(f'force = {force_info}')
+
+    # 순응 제어 시작
+    dsr.task_compliance_ctrl(stx=[3000, 3000, 500, 300, 300, 300])
+    dsr.wait(0.5)
+
+    # Z축 -30N 힘을 가하며 하강
+    dsr.set_desired_force(
+        fd=[0, 0, -30, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=dsr.DR_FC_MOD_REL
+    )
+    dsr.wait(0.5)
+
+    # 외력 감지 (z축 힘 >= 5N이면 물체에 닿은 것)
+    while True:
+        if _emergency:  # 비상정지: 하강 대기 루프 탈출
+            break
+        force_ext = dsr.get_tool_force(dsr.DR_BASE)
+        # print(f"force_ext = {force_ext}")
+        if force_ext[2] >= 6:
+            break
+        dsr.wait(0.5)
+
+    # 5. 힘 제어 해제
+    dsr.release_force()
+    dsr.wait(0.5)
+
+    # 6. 순응 제어 해제
+    dsr.release_compliance_ctrl()
+    dsr.wait(0.5)
+
 # 물체를 pick_position에서 집어 place_position으로 옮기는 pick-and-place 함수.
 # pick_position, place_position은 robot base 좌표계(mm) {x, y, z} dict이다.
 def pick_and_place_object(object_name, pick_position, place_position, object_angle):
@@ -251,7 +287,7 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
     if _emergency:
         return False
 
-    dsr.movel(place_pose, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    force_down()
     if _emergency:
         return False
 
