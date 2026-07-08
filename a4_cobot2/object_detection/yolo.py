@@ -63,7 +63,9 @@ class YoloModel:
 
     def get_best_detection(self, img_node, target):
         rclpy.spin_once(img_node)
-        frames = self.get_frames(img_node)
+        frame = self.get_frames(img_node)
+
+        frames = self.PCI_MAP(frame, 2.0)
 
         if not frames:  # Check if frames are empty
             return None, None
@@ -140,6 +142,51 @@ class YoloModel:
 
         converted.sort(key=lambda x: x["confidence"], reverse=True)
         return converted
+    
+    def PCI_MAP(in_img, ratio):
+        in_img = in_img.astype(np.float32)
+        
+        if len(in_img.shape) == 3:  
+            v, h, d = in_img.shape
+
+        Np = round(ratio * v * h)
+        a1 = np.copy(in_img)
+
+        a1[:, :, 0] /= np.sum(a1[:, :, 0]) 
+        a1[:, :, 1] /= np.sum(a1[:, :, 1])
+        a1[:, :, 2] /= np.sum(a1[:, :, 2])
+                
+        b = Np * a1 
+        mu = []
+        s2 = []
+        for i in range(d):
+            mu.append(np.mean(b[:, :, i])) 
+            s2.append(np.var(b[:, :, i])) 
+        mu = np.array(mu)
+        s2 = np.array(s2)
+        
+    
+
+        alpha = np.where(s2 != 0, mu**2 / s2, 0)
+        beta = np.where(s2 != 0, mu / s2, 0)
+
+        c = np.zeros_like(b)
+        for i in range(d):
+            c[:, :, i] = np.random.poisson(b[:, :, i])
+
+        MAP = np.zeros_like(b)
+        for i in range(d):
+            mask = b[:, :, i] > 0
+            MAP[:, :, i] = (c[:, :, i] + alpha[i] * mask) / (1 + beta[i] * mask)
+
+        MAP1 = MAP / Np
+        if np.max(MAP1) > 0:
+            out_img = MAP1 / np.max(MAP1)
+        else:
+            out_img = MAP1  
+
+        out_img = (out_img * 255).astype(np.uint8)  
+        return out_img
 
     def _aggregate_detections(self, results, confidence_threshold=0.8, iou_threshold=0.5):
         """
