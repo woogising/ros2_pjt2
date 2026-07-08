@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SrvDepthPosition.srv"
   "srv/ScanWorkspace.srv"
   "srv/JudgeWorkspace.srv"
+  "srv/GenerateReport.srv"
   "action/OrganizeObjects.action"
 )
 

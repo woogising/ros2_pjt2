@@ -52,7 +52,7 @@ class StatusNotifierNode(Node):
     # use_tts 파라미터가 true일 때 TTS 객체를 준비하는 함수
     def initialize_tts(self):
         try:
-            from voice.tts3 import TTS
+            from voice.tts import TTS
 
             self.tts = TTS()
             self.get_logger().info('TTS enabled.')
