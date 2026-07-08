@@ -66,8 +66,12 @@ setup(
             'safety_node = safety.safety_node:main',
             'status_notifier_node = notification.status_notifier_node:main',
             'vlm_report_node = notification.vlm_report_node:main',
-            'object_detection_node = object_detection.detection_grasp:main',
+            'object_detection_node = object_detection.detection:main',
             'db_node = database.db_node:main',
         ],
     },
 )
+
+
+
+

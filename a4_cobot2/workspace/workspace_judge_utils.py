@@ -26,7 +26,7 @@ DEFAULT_ZONES = {
         'place_position': {
             'x': 314.2,
             'y': 171.4,
-            'z': 4.0,
+            'z': 14.0,
         },
     },
     'yellow': {
@@ -38,7 +38,7 @@ DEFAULT_ZONES = {
         'place_position': {
             'x': 320.6,
             'y': -170.4,
-            'z': 4.0,
+            'z': 14.0,
         },
     },
     'red': {
@@ -50,7 +50,7 @@ DEFAULT_ZONES = {
         'place_position': {
             'x': 720.4,
             'y': 164.3,
-            'z': 4.0,
+            'z': 14.0,
         },
     },
     'blue': {
@@ -62,7 +62,7 @@ DEFAULT_ZONES = {
         'place_position': {
             'x': 715.8,
             'y': -167.9,
-            'z': 4.0,
+            'z': 14.0,
         },
     },
 }

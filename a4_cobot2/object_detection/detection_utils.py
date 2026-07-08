@@ -1,18 +1,25 @@
 # ============================================================
 # object_detection/detection_utils.py
 # 역할:
-#   - /scan_workspace에서 쓰는 JSON 파싱, bbox 중심 계산, depth 추출,
-#     pixel -> camera 3D 변환, 응답 payload 생성 유틸입니다.
+#   - YOLO 2D 감지 유틸(파싱 / bbox 중심 / depth / pixel→camera / payload)과
+#     3D 포인트클라우드 grasp 유틸(mask deproject / 병합 / 윗면 중심 / 각도)을 담는다.
 # 데이터 단위:
-#   - RealSense depth가 mm처럼 큰 값이면 m 단위로 변환합니다.
-#   - 반환 position은 camera_color_optical_frame 기준 m 단위입니다.
+#   - RealSense depth가 mm처럼 큰 값이면 m로 변환한다.
+#   - 3D cloud / grasp 좌표는 base 좌표계(mm) 기준이다.
+# 주의:
+#   - 3D cloud 부분은 open3d 필요 (pip install open3d).
+#   - Doosan base Z축이 "위=+Z"라고 가정 (compute_top_center_grasp).
 # ============================================================
 import json
 import math
 
-import cv2
 import numpy as np
+import open3d as o3d
 
+
+# ============================================================
+# YOLO / 2D detection 부분
+# ============================================================
 
 # scan 대상 물체 이름 목록을 JSON 문자열에서 파싱한다.
 def parse_target_names_json(target_names_json):
@@ -134,73 +141,6 @@ def build_detected_object(detection, depth_frame, intrinsics):
     }
 
 
-# 카메라 좌표계(m) position을 base<-camera 4x4 행렬로 base 좌표계(mm) position으로 변환한다.
-# camera position은 m, 로봇 posx와 캘리브레이션 행렬은 mm 단위라 1000을 곱해 맞춘다.
-def camera_position_to_base(position, base_to_camera_matrix):
-    camera_point = np.array([
-        float(position["x"]) * 1000.0,
-        float(position["y"]) * 1000.0,
-        float(position["z"]) * 1000.0,
-        1.0,
-    ])
-    base_point = base_to_camera_matrix @ camera_point
-    return {
-        "x": float(base_point[0]),
-        "y": float(base_point[1]),
-        "z": float(base_point[2]),
-    }
-
-
-# segmentation mask에서 PCA로 물체 긴 축 방향(이미지 픽셀 기준 단위벡터)을 구한다.
-def mask_pca_axis(binary_mask):
-    ys, xs = np.where(binary_mask > 0)
-    if len(xs) < 10:
-        return None
-
-    points = np.column_stack((xs, ys)).astype(np.float32)
-    _, eigenvectors = cv2.PCACompute(points, mean=None)
-    vx, vy = eigenvectors[0]
-    return float(vx), float(vy)
-
-
-# 물체 긴 축(이미지 픽셀 벡터)을 base 좌표계 각도(deg)로 변환한다.
-# 축 위 두 점을 (중심 depth로) camera->base 변환해 base 평면 각도를 구하므로,
-# 카메라 자세(eye-in-hand)와 무관하게 일관된 base 각도가 나온다.
-def image_axis_to_base_angle(cx, cy, vx, vy, depth, intrinsics, base_to_camera_matrix, span_px=20.0):
-    def to_base_xy(px, py):
-        cam = pixel_to_camera_coords(px, py, depth, intrinsics)
-        base = camera_position_to_base(
-            {"x": cam[0], "y": cam[1], "z": cam[2]}, base_to_camera_matrix
-        )
-        return base["x"], base["y"]
-
-    x1, y1 = to_base_xy(cx - span_px * vx, cy - span_px * vy)
-    x2, y2 = to_base_xy(cx + span_px * vx, cy + span_px * vy)
-    return math.degrees(math.atan2(y2 - y1, x2 - x1))
-
-
-# 여러 관측 자세에서 감지된 같은 이름 물체들을 base 좌표 평균으로 하나로 합친다.
-# (물체는 클래스당 1개라는 전제이므로 이름이 같으면 같은 물체로 본다.)
-def merge_objects_by_name(objects):
-    groups = {}
-    for obj in objects:
-        groups.setdefault(obj["name"], []).append(obj)
-
-    merged = []
-    for group in groups.values():
-        best = max(group, key=lambda o: o.get("confidence", 0.0))
-        merged_object = dict(best)
-        merged_object["position"] = {
-            "x": sum(o["position"]["x"] for o in group) / len(group),
-            "y": sum(o["position"]["y"] for o in group) / len(group),
-            "z": sum(o["position"]["z"] for o in group) / len(group),
-        }
-        merged_object["detected_pose_count"] = len(group)
-        merged.append(merged_object)
-
-    return merged
-
-
 # scan_workspace 성공 응답용 payload를 생성한다.
 def make_scan_workspace_payload(objects, skipped_count, raw_detection_count):
     return {
@@ -228,3 +168,110 @@ def make_scan_workspace_error_payload(error_message):
         },
         "error_message": str(error_message),
     }
+
+
+# ============================================================
+# 3D cloud / grasp 부분
+# ============================================================
+
+# object mask의 모든 픽셀을 aligned depth로 3D화해 base 좌표계(mm) 포인트클라우드로 변환한다.
+def deproject_mask_to_base(mask, depth_frame, intrinsics, base_to_camera_matrix):
+    ys, xs = np.where(mask > 0)
+    if len(xs) == 0:
+        return None
+
+    height, width = depth_frame.shape[:2]
+    in_bounds = (xs >= 0) & (xs < width) & (ys >= 0) & (ys < height)
+    xs, ys = xs[in_bounds], ys[in_bounds]
+    if len(xs) == 0:
+        return None
+
+    depths = np.asarray(depth_frame[ys, xs], dtype=np.float32)
+    # RealSense 16UC1이면 mm 단위 → m로 변환 (get_depth_from_frame과 동일 규칙)
+    depths = np.where(depths > 10.0, depths * 0.001, depths)
+
+    good = np.isfinite(depths) & (depths > 0.0)
+    xs, ys, depths = xs[good], ys[good], depths[good]
+    if len(xs) == 0:
+        return None
+
+    fx, fy = intrinsics["fx"], intrinsics["fy"]
+    ppx, ppy = intrinsics["ppx"], intrinsics["ppy"]
+
+    # 픽셀 → 카메라 좌표계(m)
+    cam_x = (xs - ppx) * depths / fx
+    cam_y = (ys - ppy) * depths / fy
+    cam_z = depths
+
+    # camera(m) → mm 후 base 변환 (posx / 캘리브레이션 행렬이 mm라 *1000)
+    cam_h = np.stack(
+        [cam_x * 1000.0, cam_y * 1000.0, cam_z * 1000.0, np.ones_like(cam_x)],
+        axis=0,
+    )  # (4, N)
+    base_h = base_to_camera_matrix @ cam_h  # (4, N)
+    return base_h[:3].T  # (N, 3) mm
+
+
+# 자세별로 모인 물체({name, cloud, ...})들을 이름 기준으로 포인트클라우드 concat한다.
+# (좌표를 평균내는 게 아니라 클라우드 자체를 합쳐 윗면 커버리지를 서로 보완한다.)
+def merge_clouds_by_name(items):
+    groups = {}
+    for item in items:
+        groups.setdefault(item["name"], []).append(item)
+
+    merged = {}
+    for name, group in groups.items():
+        best = max(group, key=lambda o: o.get("confidence", 0.0))
+        cloud = np.vstack([o["cloud"] for o in group])
+        merged[name] = {
+            "class_id": best["class_id"],
+            "confidence": best["confidence"],
+            "box": best["box"],
+            "cloud": cloud,
+            "count": len(group),
+        }
+    return merged
+
+
+# base 포인트클라우드에서 윗면 중심 grasp 좌표(mm)와 윗면 슬라이스 점들을 반환한다.
+def compute_top_center_grasp(points_base, voxel_size=3.0, slice_t=10.0):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points_base)
+    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+    pts = np.asarray(pcd.points)
+    if len(pts) == 0:
+        pts = np.asarray(points_base)  # SOR가 전부 지우면 원본 사용
+
+    # raw max 대신 robust max (flying pixel 방지). base +Z가 위라고 가정.
+    z_top = np.percentile(pts[:, 2], 95)
+
+    # 윗면 슬라이스만 선택
+    top_points = pts[pts[:, 2] > z_top - slice_t]
+    if len(top_points) == 0:
+        top_points = pts
+
+    # 밀림 편향 제거: voxel downsample 후 centroid
+    top_pcd = o3d.geometry.PointCloud()
+    top_pcd.points = o3d.utility.Vector3dVector(top_points)
+    top_pcd = top_pcd.voxel_down_sample(voxel_size=voxel_size)
+    top_ds = np.asarray(top_pcd.points)
+    if len(top_ds) == 0:
+        top_ds = top_points
+
+    grasp_x = float(np.mean(top_ds[:, 0]))
+    grasp_y = float(np.mean(top_ds[:, 1]))
+    grasp_z = float(z_top)  # 접근 목표 높이는 윗면 최상단
+    return (grasp_x, grasp_y, grasp_z), top_ds
+
+
+# 윗면 슬라이스 점들의 base XY 평면 PCA로 물체 긴 축 각도(deg)를 계산한다.
+def top_face_angle(top_ds):
+    xy = np.asarray(top_ds)[:, :2]
+    if len(xy) < 3:
+        return None
+
+    xy_centered = xy - xy.mean(axis=0)
+    cov = np.cov(xy_centered.T)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    major = eigvecs[:, int(np.argmax(eigvals))]  # 긴 축
+    return math.degrees(math.atan2(major[1], major[0]))
