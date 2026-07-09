@@ -25,7 +25,7 @@
 import math
 
 # --- 튜닝 파라미터 (organize_grid_placement.md §10) ---
-GRID_DIVISIONS = 10             # 구역당 x·y 분할 수
+GRID_DIVISIONS = 20             # 구역당 x·y 분할 수
 GRIPPER_CLEARANCE_GRASP = 20.0  # 파지 축(x) clearance (mm)
 GRIPPER_CLEARANCE_ALIGN = 12.0  # 정렬 축(y) clearance (mm)
 PLACE_Z = 14.0                  # 놓는 높이 (기존 zone place_position.z)
@@ -53,8 +53,8 @@ def _cell_size(zone):
     return cell_x, cell_y
 
 
+# 물체가 차지하는 셀의 갯수
 def _cells_for_size(size_mm, clearance_mm, cell_mm):
-    """물체 크기+clearance 가 차지하는 셀 수(§6). 최소 1, 최대 GRID_DIVISIONS."""
     n = math.ceil((size_mm + clearance_mm) / cell_mm)
     return max(1, min(n, GRID_DIVISIONS))
 

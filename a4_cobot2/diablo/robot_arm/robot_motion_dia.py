@@ -33,8 +33,8 @@ ROBOT_ID = 'dsr01'
 ROBOT_MODEL = 'm0609'
 
 # 테스트 모션 속도/가속도입니다. 실제 pick/place 연결 시 물체와 환경에 맞게 낮게 시작하세요.
-VELOCITY = 50
-ACC = 50
+VELOCITY = 60
+ACC = 60
 
 # pick/place 시 물체 바로 위에서 접근/후퇴하기 위한 높이 오프셋(mm)
 APPROACH_Z_OFFSET_MM = 150.0
@@ -221,7 +221,13 @@ def force_down():  # 힘 제어 하강 함수
 
     # 외력 감지 (z축 힘 >= 5N이면 물체에 닿은 것)
     while True:
-        if _emergency:  # 비상정지: 하강 대기 루프 탈출
+        if _emergency:
+            dsr.release_force()
+            dsr.wait(0.5)
+
+            # 6. 순응 제어 해제
+            dsr.release_compliance_ctrl()
+            dsr.wait(0.5)  # 비상정지: 하강 대기 루프 탈출      
             break
         force_ext = dsr.get_tool_force(dsr.DR_BASE)
         # print(f"force_ext = {force_ext}")

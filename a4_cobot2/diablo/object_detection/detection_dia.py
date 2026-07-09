@@ -44,7 +44,7 @@ PACKAGE_NAME = "a4_cobot2"
 PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 
 # YOLO 인식 프리뷰 이미지를 발행하는 주기(초). 값을 키우면 추론 부하가 줄어든다.
-DETECTION_PREVIEW_PERIOD_SEC = 3.0
+DETECTION_PREVIEW_PERIOD_SEC = 0.1
 
 
 class ObjectDetectionNode(Node):
@@ -67,26 +67,22 @@ class ObjectDetectionNode(Node):
 
         self.create_service(ScanWorkspace, "scan_workspace", self.handle_scan_workspace)
 
-        # 3자세 스캔 흐름:
-        #   robot_arm이 각 관측 자세에서 base<-camera 변환 행렬을 /scan_pose_transform으로 보내면
-        #   이 노드가 그 순간 물체를 감지해 base 좌표로 변환하고 누적한다.
-        #   마지막 자세까지 끝나면 병합 결과를 /scanned_objects_base로 task_manager에 보낸다.
+
         self.scan_accumulator = []
 
-        # current_scan_mode:
-        #   TaskManagerNode가 /workspace_scan_mode로 알려주는 현재 스캔 목적입니다.
+
+        #   TaskManagerNode가 /workspace_scan_mode로 알려주는 현재 스캔 목적
         #   check_workspace: 최초 확인 스캔
         #   recheck_workspace: 로봇 정리 후 최종 재검증 스캔
         self.current_scan_mode = "check_workspace"
 
-        # scan_image_records:
-        #   최종 재검증 3자세 스캔 중 실제로 저장한 이미지 경로 목록입니다.
-        #   최초 확인 스캔에서는 비어 있고, 마지막 재검증 payload에만 포함됩니다.
+
+        #   최종 재검증 3자세 스캔 중 실제로 저장한 이미지 경로 목록
         self.scan_image_records = []
         self.scan_session_id = None
 
-        # scan_image_dir:
-        #   사용자가 확인하기 쉽도록 가능하면 source tree의 notification/scan_images에 저장합니다.
+
+        # 사용자가 확인하기 쉽도록 가능하면 source tree의 notification/scan_images에 저장
         self.declare_parameter("scan_image_dir", "")
         scan_image_dir_param = self.get_parameter("scan_image_dir").get_parameter_value().string_value
         self.scan_image_dir = self._resolve_scan_image_dir(scan_image_dir_param)

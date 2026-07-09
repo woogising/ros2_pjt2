@@ -276,14 +276,20 @@ def apply_grid_placement(misplaced_objects, normal_objects):
             'length': _size_or_default(obj.get('length')),
         })
 
-    # 정배치 물체 → 점유 마킹 입력(위치·크기가 유효한 것만).
+    # 점유 마킹 → 지금 각 구역에 '실제로 놓여 있는' 모든 물체를 현재 위치/현재 구역으로 막는다.
+    # 정배치 물체뿐 아니라, 아직 안 옮겨진 오배치 물체(예: 사과 자리에 있는 망치)도 포함해야
+    # 그 위에 다른 물체를 배정하지 않는다. (버그: normal만 막아 오배치 위에 놓이던 문제)
     placed_inputs = []
-    for obj in normal_objects:
+    for obj in list(normal_objects) + list(misplaced_objects):
         pos = obj.get('position') or {}
+        current_zone = obj.get('current_zone')
+        # 현재 위치가 4개 구역 안에 있는 것만 점유로 잡는다(밖이면 배치에 영향 없음).
+        if current_zone not in DEFAULT_ZONES:
+            continue
         if pos.get('x') is None or pos.get('y') is None:
             continue
         placed_inputs.append({
-            'zone': obj.get('expected_zone'),
+            'zone': current_zone,
             'x': pos.get('x'),
             'y': pos.get('y'),
             'width': _size_or_default(obj.get('width')),
