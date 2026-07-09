@@ -6,10 +6,11 @@
 #     /task_status, /user_notice, /safety_state와 연결됩니다.
 #
 # 현재 연결:
-#   SCAN WORKSPACE  -> /task_command: check_workspace
-#   START SORTING   -> /task_command: start_organize
-#   RECHECK         -> /task_command: check_workspace
-#   EMERGENCY STOP  -> /task_command: stop
+#   SCAN WORKSPACE      -> /task_command: check_workspace
+#   START SORTING       -> /task_command: start_organize
+#   RECHECK             -> /task_command: check_workspace
+#   EMERGENCY STOP      -> /task_command: stop
+#   WAKE UP   -> /voice_start: start
 #
 # 현재 UI 표시 물건:
 #   A Zone: 망치, 드라이버
@@ -22,7 +23,10 @@
 #   green_apple, pineapple, pocari, gatorade
 #
 # 아직 연결 보류:
-#   RESET, REPLAY VOICE, VOICE OFF
+#   RESET
+#
+# 수동 음성 시작:
+#   WAKE UP -> /voice_start: start
 # ============================================================
 
 import sys
@@ -360,12 +364,9 @@ class SortingRobotHMI(QWidget):
         self.voice_bubble.setWordWrap(True)
 
         button_layout = QHBoxLayout()
-        replay_btn = QPushButton("REPLAY VOICE")
-        self.mute_btn = QPushButton("VOICE OFF")
-        self.mute_btn.setEnabled(False)  # 실제 TTS 제어 미연결 → 비활성화(무시)
+        robot_voice_start_btn = QPushButton("WAKE UP")
 
-        button_layout.addWidget(replay_btn)
-        button_layout.addWidget(self.mute_btn)
+        button_layout.addWidget(robot_voice_start_btn)
 
         voice_layout.addWidget(voice_title)
         voice_layout.addWidget(self.voice_bubble)
@@ -441,8 +442,7 @@ class SortingRobotHMI(QWidget):
         recheck_btn.clicked.connect(self.on_recheck_clicked)
         stop_btn.clicked.connect(self.on_stop_clicked)
         reset_btn.clicked.connect(self.on_reset_clicked)
-        replay_btn.clicked.connect(self.on_replay_voice_clicked)
-        self.mute_btn.clicked.connect(self.on_voice_toggle_clicked)
+        robot_voice_start_btn.clicked.connect(self.on_robot_voice_start_clicked)
 
     def init_ros_bridge(self):
         self.ros_bridge = HmiRosBridge()
@@ -550,29 +550,19 @@ class SortingRobotHMI(QWidget):
         self.status_cards["safety"].set_status("UNKNOWN", "#FACC15")
         self.set_default_object_table()
 
-    def on_replay_voice_clicked(self):
-        self.add_log("REPLAY VOICE button clicked")
-        self.voice_bubble.setText(f"🤖  {self.last_notice}")
+    def on_robot_voice_start_clicked(self):
+        self.add_log("WAKE UP button clicked")
+        self.set_voice_notice(
+            "헬로 로키 호출을 생략하고 음성 명령 입력을 시작합니다.\n"
+            "로봇 안내 후 원하는 명령을 말해주세요."
+        )
+        self.status_cards["voice"].set_status("LISTENING", "#38BDF8")
 
-    def on_voice_toggle_clicked(self):
-        self.voice_enabled = not self.voice_enabled
+        if self.ros_bridge is None:
+            self.add_log("ROS bridge not ready. Voice start ignored.")
+            return
 
-        if self.voice_enabled:
-            self.mute_btn.setText("VOICE OFF")
-            self.status_cards["voice"].set_status("READY", "#38BDF8")
-            self.set_voice_notice(
-                "음성 안내 표시를 켰습니다.\n"
-                "TTS 서비스가 연결되면 실제 음성 출력 ON/OFF와 연동할 수 있습니다."
-            )
-            self.add_log("VOICE display enabled")
-        else:
-            self.mute_btn.setText("VOICE ON")
-            self.status_cards["voice"].set_status("MUTED", "#FACC15")
-            self.set_voice_notice(
-                "음성 안내 표시를 껐습니다.\n"
-                "현재는 UI 표시 전용이며, 실제 TTS 제어는 아직 연결하지 않았습니다."
-            )
-            self.add_log("VOICE display muted")
+        self.ros_bridge.publish_voice_start()
 
     def set_default_object_table(self):
         table_data = []

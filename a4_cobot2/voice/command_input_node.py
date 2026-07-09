@@ -2,13 +2,29 @@
 # voice/command_input_node.py
 # 역할:
 #   - wakeword 감지 -> STT -> LLM 명령 분류 -> /task_command 발행을 담당합니다.
+#   - HMI의 WAKE UP 버튼을 누르면 wakeword를 생략하고 바로 STT 단계로 진입할 수 있습니다.
+#
 # 주요 출력 topic:
 #   - /task_command: task_manager_node가 구독하는 내부 명령어
 #   - /task_command_raw: STT 원문 확인용 디버그 topic
+#
+# 주요 입력 topic:
+#   - /voice_start: HMI에서 wakeword 없이 음성 명령 입력을 시작하는 신호
+#
 # 명령어 의미:
+#   - check_workspace: 작업공간 확인 요청
+#   - start_organize: 정리 시작 요청
 #   - stop: 로봇 동작/작업 정지 요청
 #   - shutdown: 명령 입력 노드 종료 요청
+#
+# 수정 의도:
+#   - 기존 구조는 반드시 "hello rokey" wakeword가 감지되어야만 STT가 실행되었습니다.
+#   - HMI에서 WAKE UP 버튼을 누르면 /voice_start 토픽을 발행하도록 만들었고,
+#     이 노드는 /voice_start를 받으면 wakeword가 감지된 것처럼 처리합니다.
+#   - 즉, "hello rokey"를 말하지 않아도 "동작을 말씀해주세요." 안내 후
+#     바로 음성 명령을 받을 수 있게 만든 버전입니다.
 # ============================================================
+
 import time
 import rclpy
 import pyaudio
@@ -24,9 +40,14 @@ from voice.command_classifier import CommandClassifier
 
 
 class CommandInputNode(Node):
-    # command_input_node를 초기화하고 wakeword, STT, TTS, LLM 분류기, ROS2 publisher를 준비하는 함수
+    # command_input_node를 초기화하고 wakeword, STT, TTS, LLM 분류기, ROS2 publisher/subscriber를 준비하는 함수
     def __init__(self):
         super().__init__('command_input_node')
+
+        # ========================================================
+        # Publisher
+        # ========================================================
+
         # task_manager_node가 실제로 처리하는 내부 명령어를 발행합니다.
         # 예: 'check_workspace', 'start_organize', 'stop', 'shutdown'
         self.command_pub = self.create_publisher(String, '/task_command', 10)
@@ -35,6 +56,37 @@ class CommandInputNode(Node):
         # task_manager_node는 이 topic을 사용하지 않고, 사람이 로그 확인용으로 씁니다.
         self.raw_command_pub = self.create_publisher(String, '/task_command_raw', 10)
 
+        # ========================================================
+        # Subscriber 추가 부분
+        # ========================================================
+        # [추가 기능]
+        # HMI의 WAKE UP 버튼이 눌리면 hmi_ros_bridge.py가 /voice_start 토픽으로
+        # String 메시지 "start"를 발행합니다.
+        #
+        # [의도]
+        # 원래는 사용자가 반드시 "hello rokey"라고 말해야 wakeword가 감지되고
+        # 그 다음에 STT 음성 명령 입력 단계로 넘어갔습니다.
+        # 그런데 발표/시연 상황에서는 wakeword 인식이 불안정할 수 있으므로,
+        # HMI 버튼으로 wakeword 감지 단계를 수동으로 통과시키기 위해 추가했습니다.
+        #
+        # [동작]
+        # /voice_start: start 수신
+        #   -> manual_voice_start_requested = True
+        #   -> wait_for_wakeup() 루프에서 이 값을 확인
+        #   -> wakeword가 감지된 것처럼 True 반환
+        #   -> process_voice_command_once() 실행
+        self.manual_voice_start_requested = False
+        self.voice_start_sub = self.create_subscription(
+            String,
+            '/voice_start',
+            self.voice_start_callback,
+            10
+        )
+
+        # ========================================================
+        # Voice processing objects
+        # ========================================================
+
         # 음성 입력 처리 객체들입니다.
         # STT: 실제 음성 -> 텍스트
         # TTS: 사용자에게 안내 멘트 출력/음성 출력
@@ -42,6 +94,7 @@ class CommandInputNode(Node):
         self.stt = STT()
         self.tts = TTS()
         self.command_classifier = CommandClassifier()
+
         # wakeword 감지용 마이크 설정입니다.
         # rate=48000: 실제 마이크 입력 샘플링 레이트
         # buffer_size=24000: WakeupWord가 한 번에 읽는 버퍼 크기
@@ -58,22 +111,100 @@ class CommandInputNode(Node):
 
         self.get_logger().info('CommandInputNode started.')
 
+    # ============================================================
+    # 추가된 callback
+    # ============================================================
+    # HMI에서 /voice_start가 들어오면 wakeword를 생략하고 음성 명령 입력 단계로 넘어가도록 표시합니다.
+    #
+    # 원본에는 이 함수가 없었습니다.
+    # 원본 구조:
+    #   main()
+    #     -> wait_for_wakeup()
+    #     -> "hello rokey" 감지 성공 시에만 process_voice_command_once()
+    #
+    # 수정 후 구조:
+    #   main()
+    #     -> wait_for_wakeup()
+    #        1) "hello rokey" 감지 성공
+    #        또는
+    #        2) /voice_start 수신
+    #     -> process_voice_command_once()
+    #
+    # 즉 /voice_start는 "hello rokey가 감지된 것과 같은 효과"를 내는 수동 wakeup 신호입니다.
+    def voice_start_callback(self, msg: String):
+        command = msg.data.strip().lower()
+
+        if command in ['start', 'true', '1', 'voice_start']:
+            self.manual_voice_start_requested = True
+            self.get_logger().info('/voice_start received. Manual voice command mode requested.')
+        else:
+            self.get_logger().warn(f'/voice_start ignored. Unknown data: {msg.data}')
+
     # TTS 출력이 STT 녹음에 섞이지 않도록 잠깐 대기하는 함수
     def wait_after_tts(self, seconds: float = 1.0):
         time.sleep(seconds)
 
     # hello, rokey 시동어가 감지될 때까지 마이크 stream을 열고 대기하는 함수
     def wait_for_wakeup(self) -> bool:
-        self.get_logger().info('"hello, rokey" 시동어 대기중')
+        self.get_logger().info('"hello, rokey" 시동어 또는 HMI WAKE UP 버튼 대기중')
 
         try:
             self.mic_controller.open_stream()
             self.wakeup_word.set_stream(self.mic_controller.stream)
 
             while rclpy.ok():
+                # ========================================================
+                # 추가된 부분 1: wakeword 대기 중에도 ROS 콜백 처리
+                # ========================================================
+                # [왜 필요한가?]
+                # 이 함수는 while 루프 안에서 wakeup_word.is_wakeup()을 계속 검사합니다.
+                # 원본 코드에서는 이 루프 안에서 rclpy.spin_once()를 호출하지 않았기 때문에,
+                # /voice_start 토픽이 들어와도 voice_start_callback()이 실행될 기회가 없었습니다.
+                #
+                # [의도]
+                # HMI의 WAKE UP 버튼 입력을 command_input_node가 즉시 받을 수 있게 하기 위해
+                # wakeword 대기 루프 안에서 ROS 이벤트를 조금씩 처리합니다.
+                rclpy.spin_once(self, timeout_sec=0.01)
+
+                # ========================================================
+                # 추가된 부분 2: HMI 수동 wakeup 요청 확인
+                # ========================================================
+                # [동작]
+                # HMI에서 /voice_start: start가 들어오면
+                # voice_start_callback()이 manual_voice_start_requested를 True로 바꿉니다.
+                # 여기서 그 값을 확인하고 True이면 wakeword를 들은 것처럼 처리합니다.
+                #
+                # [중요]
+                # return True 이후 main()에서 process_voice_command_once()가 실행됩니다.
+                # 즉, 사용자는 "hello rokey" 없이 바로 "작업공간 확인해줘" 같은 명령을 말하면 됩니다.
+                if self.manual_voice_start_requested:
+                    self.manual_voice_start_requested = False
+                    self.get_logger().info('Manual voice start requested. Skip wakeword.')
+                    return True
+
+                # ========================================================
+                # 원본 기능 유지
+                # ========================================================
+                # 아래 코드는 원본의 wakeword 감지 로직입니다.
+                # 삭제하지 않고 그대로 유지했습니다.
+                # 따라서 HMI 버튼 없이도 기존처럼 "hello rokey"를 말하면 정상 동작합니다.
                 if self.wakeup_word.is_wakeup():
                     self.get_logger().info('Wakeword detected.')
                     return True
+
+                # --------------------------------------------------------
+                # [원본 코드 참고]
+                # 원본에는 아래처럼 wakeword만 검사했습니다.
+                #
+                # while rclpy.ok():
+                #     if self.wakeup_word.is_wakeup():
+                #         self.get_logger().info('Wakeword detected.')
+                #         return True
+                #
+                # 이 부분을 삭제한 것이 아니라,
+                # HMI /voice_start 입력을 받을 수 있도록 위에 spin_once()와
+                # manual_voice_start_requested 확인 조건을 추가한 것입니다.
+                # --------------------------------------------------------
 
         except OSError:
             self.get_logger().error('마이크 stream을 열 수 없습니다. device_index를 확인하세요.')

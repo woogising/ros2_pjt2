@@ -276,9 +276,40 @@ def top_face_angle(top_ds):
     major = eigvecs[:, int(np.argmax(eigvals))]  # 긴 축
 
     angle_deg = math.degrees(math.atan2(major[1], major[0]))
+
     if angle_deg > 90:
         angle_deg -= 180
     elif angle_deg < -90:
         angle_deg += 180
 
     return angle_deg
+
+
+
+# 전체 포인트클라우드를 주축(angle_deg 방향)/부축에 투영해 물체 폭/길이(mm)를 구한다.
+# (organize_grid_placement.md §5 footprint extent)
+#   width  = 짧은 축(부축=파지 축) 방향 범위
+#   length = 긴 축(주축) 방향 범위
+# 주의:
+#   - grasp 위치는 윗면 슬라이스지만 크기는 full footprint를 써야 한다.
+#     윗면만 쓰면 옆면이 좁은 물체에서 최대 폭보다 작게 나와 clearance가 부족해진다.
+#   - min-max가 아니라 robust percentile을 써서 flying pixel/노이즈 과대추정을 막는다.
+#   - angle_deg는 top_face_angle 결과(major_axis_angle)를 그대로 재사용한다.
+def footprint_extent(points_base, angle_deg, percentile=(2.0, 98.0)):
+    pts = np.asarray(points_base)
+    if angle_deg is None or len(pts) < 3:
+        return None, None
+
+    xy = pts[:, :2]
+    theta = math.radians(angle_deg)
+    major = np.array([math.cos(theta), math.sin(theta)])
+    minor = np.array([-math.sin(theta), math.cos(theta)])
+
+    centered = xy - xy.mean(axis=0)
+    proj_major = centered @ major
+    proj_minor = centered @ minor
+
+    lo, hi = percentile
+    length = float(np.percentile(proj_major, hi) - np.percentile(proj_major, lo))
+    width = float(np.percentile(proj_minor, hi) - np.percentile(proj_minor, lo))
+    return width, length

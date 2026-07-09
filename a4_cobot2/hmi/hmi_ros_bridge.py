@@ -5,11 +5,13 @@
 #
 # HMI -> ROS2
 #   - /task_command 로 String command publish
+#   - /voice_start 로 wakeword 생략 음성인식 시작 신호 publish
 #
 # ROS2 -> HMI
 #   - /task_status 구독
 #   - /user_notice 구독
 #   - /safety_state 구독
+#   - /yolo_detection_image 구독
 #
 # 현재 팀 구조 기준:
 #   command:
@@ -17,6 +19,11 @@
 #     start_organize
 #     stop
 #     shutdown
+#
+# 추가 기능:
+#   WAKE UP 버튼을 누르면 /voice_start: start를 발행합니다.
+#   command_input_node는 이 신호를 받아 "hello rokey" 없이
+#   바로 음성 명령 입력 단계로 넘어갑니다.
 # ============================================================
 
 import rclpy
@@ -42,6 +49,7 @@ except Exception:
 
 TOPIC_SAFETY_STATE = "/safety_state"
 TOPIC_DETECTION_IMAGE = "/yolo_detection_image"
+TOPIC_VOICE_START = "/voice_start"
 
 
 class HmiRosNode(Node):
@@ -54,6 +62,15 @@ class HmiRosNode(Node):
         self.task_command_pub = self.create_publisher(
             String,
             TOPIC_TASK_COMMAND,
+            10
+        )
+
+        # HMI -> command_input_node
+        # WAKE UP 버튼이 눌리면 "hello rokey" wakeword를 생략하고
+        # 바로 음성 명령 입력 단계로 진입시키기 위한 신호를 보냅니다.
+        self.voice_start_pub = self.create_publisher(
+            String,
+            TOPIC_VOICE_START,
             10
         )
 
@@ -74,8 +91,6 @@ class HmiRosNode(Node):
         )
 
         # safety_node -> HMI
-        # safety_node가 /safety_state를 TRANSIENT_LOCAL(래치)로 발행하므로,
-        # 시작 시 마지막 안전 상태를 받으려면 구독도 TRANSIENT_LOCAL로 맞춘다.
         safety_state_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
@@ -108,6 +123,14 @@ class HmiRosNode(Node):
         self.get_logger().info(f"Published task command: {command}")
         self.bridge.log_signal.emit(f"Published /task_command: {command}")
 
+    def publish_voice_start(self):
+        msg = String()
+        msg.data = "start"
+        self.voice_start_pub.publish(msg)
+
+        self.get_logger().info("Published voice start signal")
+        self.bridge.log_signal.emit("Published /voice_start: start")
+
     def task_status_callback(self, msg: String):
         status = msg.data.strip()
         self.bridge.task_status_signal.emit(status)
@@ -123,16 +146,14 @@ class HmiRosNode(Node):
             self.bridge.safety_state_signal.emit(safety_state)
 
     def detection_image_callback(self, msg: Image):
-        # cv2/cv_bridge를 쓰면 opencv 번들 Qt 플러그인이 PyQt5와 충돌하므로,
-        # ROS Image 메시지에서 직접 QImage를 만든다.
         try:
             image = QImage(
                 bytes(msg.data), msg.width, msg.height, msg.step, QImage.Format_RGB888
             )
             if msg.encoding == "bgr8":
-                qimage = image.rgbSwapped()  # BGR → RGB (복사본 생성)
+                qimage = image.rgbSwapped()
             else:
-                qimage = image.copy()  # 버퍼 소유
+                qimage = image.copy()
             self.bridge.detection_image_signal.emit(qimage)
         except Exception as exc:
             self.get_logger().warn(f"detection image 변환 실패: {exc}")
@@ -182,6 +203,13 @@ class HmiRosBridge(QThread):
             return
 
         self.node.publish_task_command(command)
+
+    def publish_voice_start(self):
+        if self.node is None:
+            self.log_signal.emit("ROS node is not ready. Voice start ignored.")
+            return
+
+        self.node.publish_voice_start()
 
     def stop_bridge(self):
         self.running = False

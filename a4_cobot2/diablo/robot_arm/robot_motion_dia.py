@@ -47,7 +47,10 @@ PICK_Z_OFFSET_MM = 40.0
 # GRASP_ORIENTATION = [90, 180, 90]
 
 # 파지 각도 보정(도). 그리퍼가 물체 각도와 어긋나면(예: ~45° 틀어짐) 이 값으로 맞춘다.
+GRIPPER_ANGLE_OFFSET_DEG = 0.0
 
+# pick 시 물체 폭 대비 추가로 벌릴 여유(mm). 옆 물체를 안 치도록 full open 대신 사용.
+OPEN_MARGIN_MM = 30.0
 
 # gripper<-camera 캘리브레이션 행렬(mm 단위). eye-in-hand 카메라 외부 파라미터입니다.
 NPY_PATH = os.path.join(
@@ -131,7 +134,7 @@ def connect():
     DR_init.__dsr__node = _node
 
     import DSR_ROBOT2 as dsr_module
-    from robot_arm.onrobot import RG
+    from .onrobot import RG
 
     dsr = dsr_module
     gripper = RG(GRIPPER_NAME, TOOLCHARGER_IP, TOOLCHARGER_PORT)
@@ -184,6 +187,14 @@ def grip_open(force=200):
     pass
 
 
+# 그리퍼를 지정 폭(mm)까지만 벌리는 함수. 옆 물체를 안 치도록 물체 폭에 맞춰 벌린다.
+# onrobot 그리퍼는 폭을 '1/10 mm 정수'로 받는다(모드버스 레지스터). mm → 1/10mm 변환 + 정수화.
+def grip_open_to(width_mm, force=200):
+    width_tenths = int(round(float(width_mm) * 10.0))
+    width_tenths = max(0, min(width_tenths, gripper.max_width))  # 유효 범위로 clamp
+    gripper.move_gripper(width_tenths, int(force))
+
+
 # 그리퍼를 닫는 함수 (실제 그리퍼 제어 API 연결 필요)
 def grip_close(force=200):
     gripper.close_gripper(force)
@@ -226,18 +237,30 @@ def force_down():  # 힘 제어 하강 함수
     dsr.release_compliance_ctrl()
     dsr.wait(0.5)
 
+# 물체 각도(base, deg)를 탑다운 파지 손목자세(posx rx,ry,rz)로 바꾼다.
+# angle의 긴 축에 수직으로 잡도록 rz를 돌린다. angle=None이면 기본 자세.
+def _grasp_orientation(angle):
+    orient = [90, 180, 90]
+    if angle is not None:
+        rot = angle - 90 if angle >= 0 else angle + 90
+        rot += GRIPPER_ANGLE_OFFSET_DEG
+        orient[2] += rot
+    return orient
+
+
 # 물체를 pick_position에서 집어 place_position으로 옮기는 pick-and-place 함수.
 # pick_position, place_position은 robot base 좌표계(mm) {x, y, z} dict이다.
-def pick_and_place_object(object_name, pick_position, place_position, object_angle):
+# object_width: 물체 폭(mm). 주면 pick 시 그 폭+여유만큼만 벌린다(옆 물체 회피).
+# place_angle: 놓을 때 물체 주축을 맞출 목표각(base, deg). 주면 place 손목자세를 이 각으로
+#              돌려(그리드 y평행 배치) 놓는다. None이면 pick 자세 그대로 놓는다(기존 동작).
+def pick_and_place_object(object_name, pick_position, place_position, object_angle,
+                          object_width=None, place_angle=None):
     if dsr is None:
         raise RuntimeError('robot_motion.connect()가 먼저 호출되지 않았습니다.')
 
     if _emergency:
-        return 
-
-    
+        return False
     GRASP_ORIENTATION = [90, 180, 90]
-    GRASP_ORIENTATION2 = [180, -150, 90]
     if pick_position is None or place_position is None:
         raise ValueError(f'{object_name}의 pick 또는 place 위치가 없습니다.')
     
@@ -246,75 +269,88 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
         rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
         # 실기 보정: 그리퍼가 물체 각도와 어긋나면 GRIPPER_ANGLE_OFFSET_DEG로 맞춘다.
         # 방향(부호)이 반대로 돌면 아래 += 를 -= 로 바꾼다.
-
+        rot += GRIPPER_ANGLE_OFFSET_DEG
         GRASP_ORIENTATION[2] += rot
-        GRASP_ORIENTATION2[2] += rot
         _node.get_logger().info(
             f'[angle] object_angle={object_angle:.1f}, rot={rot:.1f}, rz={GRASP_ORIENTATION[2]:.1f}'
         )
 
-    if float(pick_position['x']) < 650.00:
-        # base 좌표(mm) {x, y, z}에 고정 그리퍼 자세를 붙여 posx 6요소를 만든다.
-        pick_pose = [
-            float(pick_position['x']), float(pick_position['y']), float(pick_position['z'])
-        ] + GRASP_ORIENTATION
-        place_pose = [
-            float(place_position['x']), float(place_position['y']), float(pick_position['z'])
-        ] + GRASP_ORIENTATION
-
-
-
-        # 감지 z가 살짝 높아 물건 위를 잡을 때, 이 값만큼 더 내려가서 잡는다. (mm)
-        if pick_pose[2] > 60.00:
-            PICK_Z_OFFSET_MM = 45.00
-        else: 
-            PICK_Z_OFFSET_MM = 30.00
-        
-        pick_pose[2] -= PICK_Z_OFFSET_MM
-
-        # 물체 바로 위 접근 지점(집기 전/놓기 전 안전 높이)
-        pick_approach = pick_pose.copy()
-        pick_approach[2] += APPROACH_Z_OFFSET_MM
-
-        place_approach = place_pose.copy()
-        place_approach[2] += APPROACH_Z_OFFSET_MM
-
-        _node.get_logger().info(f'[pick_and_place] {object_name} 시작')
-
-        grip_open()
-
-        # ① 물체 위로 접근 (절대, 고정 자세)
-        dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
-        if _emergency:
-            return False
-
-        # ③ 상대로 하강 (회전 유지) — 툴Z로 접근높이만큼 내려감
-        dsr.movel([0, 0, APPROACH_Z_OFFSET_MM, 0, 0, 0], vel=VELOCITY - 20, acc=ACC - 20, ref=dsr.DR_TOOL)
-        if _emergency:
-            return False
-
-        grip_close()
-        dsr.wait(2.0)
-        # 들어 올린 뒤 목표 위치 위로 이동 → 내려놓기
-        dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
-        if _emergency:
-            return False
-
-        dsr.movel(place_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
-        if _emergency:
-            return False
-
-        force_down()
-        if _emergency:
-            return False
-
-        grip_open()
-
-        # 안전 높이로 복귀
-        dsr.movel(place_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
-
+    # 놓을 때 손목자세: place_angle을 주면 그 각(그리드 y평행)으로, 없으면 pick 자세 그대로.
+    if place_angle is not None:
+        PLACE_ORIENTATION = _grasp_orientation(place_angle)
     else:
-        dsr.movel()
+        PLACE_ORIENTATION = GRASP_ORIENTATION
+
+    # base 좌표(mm) {x, y, z}에 그리퍼 자세를 붙여 posx 6요소를 만든다.
+    pick_pose = [
+        float(pick_position['x']), float(pick_position['y']), float(pick_position['z'])
+    ] + GRASP_ORIENTATION
+    place_pose = [
+        float(place_position['x']), float(place_position['y']), float(pick_position['z'])
+    ] + PLACE_ORIENTATION
+
+    # 감지 z가 살짝 높아 물건 위를 잡을 때, 이 값만큼 더 내려가서 잡는다. (mm)
+    
+    if pick_pose[2] > 60.00:
+        PICK_Z_OFFSET_MM = 45.00
+    else: 
+        PICK_Z_OFFSET_MM = 30.00
+    
+    pick_pose[2] -= PICK_Z_OFFSET_MM
+
+    # 물체 바로 위 접근 지점(집기 전/놓기 전 안전 높이)
+    pick_approach = pick_pose.copy()
+    pick_approach[2] += APPROACH_Z_OFFSET_MM
+
+    place_approach = place_pose.copy()
+    place_approach[2] += APPROACH_Z_OFFSET_MM
+
+    _node.get_logger().info(f'[pick_and_place] {object_name} 시작')
+
+    # 물체 폭을 알면 그 폭+여유만큼만 벌려 옆 물체를 안 치게 한다.
+    if object_width is not None:
+        grip_open_to(float(object_width) + OPEN_MARGIN_MM)
+    else:
+        grip_open()
+
+    # ① 물체 위로 접근 (절대, 고정 자세)
+    dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    # ② 접근 위치에서 각도에 맞춰 손목 회전 (툴Z 상대, movel=동기)
+    # if object_angle is not None:
+
+    #     rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
+    #     dsr.amovel([0, 0, 0, 0, 0, rot], vel=VELOCITY, acc=ACC, ref=dsr.DR_TOOL)
+
+    #     if _emergency:
+    #         return False
+
+    # ③ 상대로 하강 (회전 유지) — 툴Z로 접근높이만큼 내려감
+    dsr.movel([0, 0, APPROACH_Z_OFFSET_MM, 0, 0, 0], vel=VELOCITY - 20, acc=ACC - 20, ref=dsr.DR_TOOL)
+    if _emergency:
+        return False
+
+    grip_close()
+    dsr.wait(2.0)
+    # 들어 올린 뒤 목표 위치 위로 이동 → 내려놓기
+    dsr.movel(pick_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    dsr.movel(place_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
+    if _emergency:
+        return False
+
+    force_down()
+    if _emergency:
+        return False
+
+    grip_open()
+
+    # 안전 높이로 복귀
+    dsr.movel(place_approach, vel=VELOCITY, acc=ACC, ref=dsr.DR_BASE)
 
     return not _emergency
 
