@@ -129,11 +129,36 @@ class ObjectDetectionNode(Node):
         try:
             results = self.model.model(frame, verbose=False, retina_masks=True)
             annotated = results[0].plot()  # 박스/마스크/라벨이 그려진 BGR 이미지
+            self._draw_angle_overlays(annotated, results[0])  # 중심 + 각도 짝대기
             self.detection_image_pub.publish(
                 self.bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
             )
         except Exception as exc:
             self.get_logger().warn(f"detection preview 발행 실패: {exc}")
+
+    # 각 물체 mask의 중심과 PCA 긴 축(각도 방향)을 이미지에 짝대기로 그려 디버깅한다.
+    # (여기 각도는 "이미지 평면" mask PCA이며, 실제 파지 각도는 base 좌표계라 완전히 같지는 않다.)
+    def _draw_angle_overlays(self, image, result):
+        if result.masks is None:
+            return
+
+        masks = result.masks.data.cpu().numpy()
+        for m in masks:
+            ys, xs = np.where(m > 0.5)
+            if len(xs) < 10:
+                continue
+
+            cx, cy = int(xs.mean()), int(ys.mean())
+            points = np.column_stack((xs, ys)).astype(np.float32)
+            _, eigenvectors = cv2.PCACompute(points, mean=None)
+            vx, vy = float(eigenvectors[0][0]), float(eigenvectors[0][1])
+
+            length = 40
+            p1 = (int(cx - length * vx), int(cy - length * vy))
+            p2 = (int(cx + length * vx), int(cy + length * vy))
+
+            cv2.line(image, p1, p2, (0, 255, 255), 2)        # 노란색: 긴 축(각도 방향)
+            cv2.circle(image, (cx, cy), 4, (0, 0, 255), -1)  # 빨간색: 중심점
 
     # scan image 저장 경로를 결정하는 함수
     def _resolve_scan_image_dir(self, scan_image_dir_param: str) -> str:
@@ -402,7 +427,11 @@ class ObjectDetectionNode(Node):
         for name, item in merged.items():
             try:
                 (gx, gy, gz), top_ds = compute_top_center_grasp(item["cloud"])
-                angle = top_face_angle(top_ds)
+                # 각도는 윗면 슬라이스(top_ds)가 아니라 전체 클라우드로 계산한다.
+                # 망치 머리/드라이버 손잡이처럼 '가장 높은 부분'이 뭉툭하면
+                # 슬라이스가 길쭉하지 않아 PCA 긴 축/짧은 축이 뒤바뀐다(각도 90° 튐).
+                # 전체 발자국(손잡이+머리)은 확실히 길쭉해서 긴 축이 안정적으로 잡힌다.
+                angle = top_face_angle(item["cloud"])
             except Exception as exc:
                 self.get_logger().error(f"{name} grasp 계산 실패: {exc}")
                 continue

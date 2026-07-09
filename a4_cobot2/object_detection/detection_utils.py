@@ -234,7 +234,7 @@ def merge_clouds_by_name(items):
 
 
 # base 포인트클라우드에서 윗면 중심 grasp 좌표(mm)와 윗면 슬라이스 점들을 반환한다.
-def compute_top_center_grasp(points_base, voxel_size=3.0, slice_t=10.0):
+def compute_top_center_grasp(points_base, voxel_size=3.0, slice_t=15.0):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points_base)
     pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)

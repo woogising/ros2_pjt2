@@ -37,14 +37,17 @@ VELOCITY = 50
 ACC = 50
 
 # pick/place 시 물체 바로 위에서 접근/후퇴하기 위한 높이 오프셋(mm)
-APPROACH_Z_OFFSET_MM = 50.0
+APPROACH_Z_OFFSET_MM = 150.0
 
 # pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
 PICK_Z_OFFSET_MM = 40.0
 
 # 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
 # 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
-GRASP_ORIENTATION = [90, 180, 90]
+# GRASP_ORIENTATION = [90, 180, 90]
+
+# 파지 각도 보정(도). 그리퍼가 물체 각도와 어긋나면(예: ~45° 틀어짐) 이 값으로 맞춘다.
+GRIPPER_ANGLE_OFFSET_DEG = 0.0
 
 # gripper<-camera 캘리브레이션 행렬(mm 단위). eye-in-hand 카메라 외부 파라미터입니다.
 NPY_PATH = os.path.join(
@@ -231,9 +234,20 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
 
     if _emergency:
         return False
-
+    GRASP_ORIENTATION = [90, 180, 90]
     if pick_position is None or place_position is None:
         raise ValueError(f'{object_name}의 pick 또는 place 위치가 없습니다.')
+    
+    if object_angle is not None:
+
+        rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
+        # 실기 보정: 그리퍼가 물체 각도와 어긋나면 GRIPPER_ANGLE_OFFSET_DEG로 맞춘다.
+        # 방향(부호)이 반대로 돌면 아래 += 를 -= 로 바꾼다.
+        rot += GRIPPER_ANGLE_OFFSET_DEG
+        GRASP_ORIENTATION[2] += rot
+        _node.get_logger().info(
+            f'[angle] object_angle={object_angle:.1f}, rot={rot:.1f}, rz={GRASP_ORIENTATION[2]:.1f}'
+        )
 
     # base 좌표(mm) {x, y, z}에 고정 그리퍼 자세를 붙여 posx 6요소를 만든다.
     pick_pose = [
@@ -269,13 +283,13 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
         return False
 
     # ② 접근 위치에서 각도에 맞춰 손목 회전 (툴Z 상대, movel=동기)
-    if object_angle is not None:
+    # if object_angle is not None:
 
-        rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
-        dsr.amovel([0, 0, 0, 0, 0, rot], vel=VELOCITY, acc=ACC, ref=dsr.DR_TOOL)
+    #     rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
+    #     dsr.amovel([0, 0, 0, 0, 0, rot], vel=VELOCITY, acc=ACC, ref=dsr.DR_TOOL)
 
-        if _emergency:
-            return False
+    #     if _emergency:
+    #         return False
 
     # ③ 상대로 하강 (회전 유지) — 툴Z로 접근높이만큼 내려감
     dsr.movel([0, 0, APPROACH_Z_OFFSET_MM, 0, 0, 0], vel=VELOCITY - 20, acc=ACC - 20, ref=dsr.DR_TOOL)
