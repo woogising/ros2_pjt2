@@ -1,10 +1,9 @@
 # ============================================================
-# workspace/workspace_judge_node.py
+# diablo/workspace/workspace_judge_node_dia.py
 # 역할:
-#   - /judge_workspace service server입니다.
-#   - task_manager_node가 보낸 detected_objects_json을 받아 정상/오배치/규칙 미정 물체로 분류합니다.
-# 판단 기준:
-#   - workspace_judge_utils.py의 DEFAULT_ZONES, CLASS_TO_ZONE
+#   - 원본 workspace_judge_node와 동일하나, 그리드 배치가 적용된
+#     workspace_judge_utils_dia(=apply_grid_placement 포함)를 사용한다.
+#   - a4_cobot2_dia.launch.py에서만 실행된다.
 # ============================================================
 import json
 import rclpy
@@ -12,7 +11,7 @@ import rclpy
 from rclpy.node import Node
 from od_msg.srv import JudgeWorkspace
 
-from workspace.workspace_judge_utils import get_default_zone_rules, judge_workspace, make_error_payload
+from .workspace_judge_utils import get_default_zone_rules, judge_workspace, make_error_payload
 
 
 class WorkspaceJudgeNode(Node):
@@ -28,8 +27,8 @@ class WorkspaceJudgeNode(Node):
 
         self.zone_rules = get_default_zone_rules()
 
-        self.get_logger().info('WorkspaceJudgeNode started.')
-        self.get_logger().info('/judge_workspace service ready.')
+        self.get_logger().info('WorkspaceJudgeNode (dia) started.')
+        self.get_logger().info('/judge_workspace service ready. (grid placement)')
 
     # task_manager_node의 판단 요청을 받아 JSON을 파싱하고 정상/오배치 판단 결과를 반환하는 함수
     def handle_judge_workspace(self, request, response):

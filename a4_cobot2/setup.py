@@ -27,10 +27,6 @@ setup(
         'database.*',
         'hmi',
         'hmi.*',
-
-        # diablo: 원본과 병행 실행하는 그리드 배치 버전(_dia). 원본 패키지는 그대로 둔다.
-        'diablo',
-        'diablo.*',
     ]),
 
     data_files=[
@@ -75,11 +71,6 @@ setup(
             'object_detection_node = object_detection.detection:main',
             'hmi_interface_node = hmi.hmi_interface:main',
             'db_node = database.db_node:main',
-
-            # diablo(_dia) 버전 노드. a4_cobot2_dia.launch.py에서만 사용.
-            'object_detection_node_dia = diablo.object_detection.detection_dia:main',
-            'workspace_judge_node_dia = diablo.workspace.workspace_judge_node_dia:main',
-            'robot_arm_node_dia = diablo.robot_arm.robot_arm_node_dia:main',
         ],
     },
 )

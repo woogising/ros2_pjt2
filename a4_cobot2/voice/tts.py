@@ -4,10 +4,6 @@
 #   - Microsoft edge-tts로 문장을 자연스러운 음성으로 빠르게 읽어줍니다.
 #   - 무료이며 API 키가 필요 없습니다. (Microsoft Edge 온라인 TTS)
 #   - 기존 voice/tts.py와 인터페이스(speak)는 동일합니다.
-# 사용법:
-#   - command_input_node / status_notifier_node에서
-#       from voice.tts import TTS   →   from voice.tts3 import TTS
-#     로 바꾸면 그대로 교체됩니다.
 # 필요:
 #   - pip install edge-tts
 #   - ffplay(ffmpeg) 로 mp3 재생 (시스템에 설치돼 있어야 함)

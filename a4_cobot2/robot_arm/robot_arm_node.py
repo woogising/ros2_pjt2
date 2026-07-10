@@ -23,7 +23,7 @@ from std_msgs.msg import Bool, Float64MultiArray, Int32
 from std_srvs.srv import Trigger
 from od_msg.action import OrganizeObjects
 
-from . import robot_motion
+from . import robot_motion as robot_motion
 
 
 # 각 스캔 자세에서 detection이 캡처 완료를 알릴 때까지 기다리는 최대 시간(초)
@@ -296,6 +296,9 @@ class RobotArmNode(Node):
         place_frame = misplaced_object.get('place_frame', 'unknown_frame')
         expected_zone = misplaced_object.get('expected_zone', 'unknown_zone')
         object_angle = misplaced_object.get('angle')
+        # 그리드 배치용: 물체 폭(pick 시 벌림)과 놓을 목표각(y평행)
+        object_width = misplaced_object.get('width')
+        place_angle = misplaced_object.get('place_angle')
 
         self.get_logger().info(f'정리 작업 시작: {object_name}')
         self.get_logger().info(f'pick_position: {pick_position}')
@@ -315,8 +318,12 @@ class RobotArmNode(Node):
         robot_motion.clear_stop()
 
 
-        # 감지된 pick 위치와 zone 대표 place 위치(둘 다 base 좌표계 mm)를 넘겨 실제 파지·이동 수행
-        success = robot_motion.pick_and_place_object(object_name, pick_position, place_position, object_angle)
+        # 감지된 pick 위치와 그리드 place 위치(둘 다 base 좌표계 mm)를 넘겨 실제 파지·이동 수행.
+        # object_width로 벌림폭 조절, place_angle로 놓을 때 y평행 회전.
+        success = robot_motion.pick_and_place_object(
+            object_name, pick_position, place_position, object_angle,
+            object_width=object_width, place_angle=place_angle,
+        )
 
         if not success:
             raise RuntimeError('test motion failed or stopped')

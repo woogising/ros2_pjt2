@@ -88,9 +88,25 @@ class YoloModel:
         best_det = max(matches, key=lambda x: x["score"])
         return best_det["box"], best_det["score"]
 
-    def get_all_detections(self, img_node, target_names=None):
+    # target_names를 class_id set으로 바꾸는 함수
+    def _target_ids_from_names(self, target_names=None):
+        if not target_names:
+            return None
+
+        target_ids = set()
+        for name in target_names:
+            if name in self.reversed_class_dict:
+                target_ids.add(self.reversed_class_dict[name])
+            else:
+                print(f"Unknown target class ignored: {name}")
+
+        return target_ids
+
+    # 이미 캡처된 frame list를 받아 YOLO-seg detection을 수행하는 함수
+    # EnsembleDetector가 YOLO/RT-DETR/SAM2를 같은 시점 frame 기준으로 맞추기 위해 사용합니다.
+    def get_all_detections_from_frames(self, frames, target_names=None):
         """
-        현재 카메라 프레임에서 탐지된 모든 물체를 반환한다.
+        이미 캡처된 여러 frame에서 탐지된 모든 물체를 반환한다.
 
         반환 형식:
         [
@@ -98,25 +114,16 @@ class YoloModel:
                 "name": "hammer",
                 "class_id": 1,
                 "box": [x1, y1, x2, y2],
-                "confidence": 0.89
+                "confidence": 0.89,
+                "mask": mask,
             }
         ]
         """
-        rclpy.spin_once(img_node)
-        frames = self.get_frames(img_node)
-
         if not frames:
             print("No frames available for detection.")
             return []
 
-        target_ids = None
-        if target_names:
-            target_ids = set()
-            for name in target_names:
-                if name in self.reversed_class_dict:
-                    target_ids.add(self.reversed_class_dict[name])
-                else:
-                    print(f"Unknown target class ignored: {name}")
+        target_ids = self._target_ids_from_names(target_names)
 
         results = self.model(frames, verbose=False, retina_masks=True)
         detections = self._aggregate_detections(results)
@@ -137,11 +144,23 @@ class YoloModel:
                     "box": det["box"],
                     "confidence": float(det["score"]),
                     "mask": det.get("mask"),
+                    "source": "yolo",
+                    "yolo_confidence": float(det["score"]),
                 }
             )
 
         converted.sort(key=lambda x: x["confidence"], reverse=True)
         return converted
+
+    # ImgNode에서 frame을 직접 캡처해 YOLO-seg detection을 수행하는 기존 호환 함수
+    def get_all_detections(self, img_node, target_names=None):
+        """
+        현재 카메라 프레임에서 탐지된 모든 물체를 반환한다.
+        기존 ObjectDetectionNode와의 호환성을 위해 유지합니다.
+        """
+        rclpy.spin_once(img_node)
+        frames = self.get_frames(img_node)
+        return self.get_all_detections_from_frames(frames, target_names=target_names)
     
     def PCI_MAP(in_img, ratio):
         in_img = in_img.astype(np.float32)

@@ -13,9 +13,12 @@
 TARGET_OBJECTS = [
     'hammer',
     'screwdriver',
-    'wrench',
-    'pliers',
-    'drill',
+    'bolt',
+    'tape',
+    'green_apple',
+    'pineapple',
+    'pocari',
+    'gatorade',
 ]
 
 # ObjectDetectionNode가 반환하는 좌표 frame 이름
@@ -42,6 +45,11 @@ ACTION_ORGANIZE_OBJECTS = '/organize_objects'
 # Service/action server 대기 시간입니다.
 SERVICE_WAIT_TIMEOUT_SEC = 2.0
 ACTION_WAIT_TIMEOUT_SEC = 2.0
+
+# ==========================DB==========================================
+TOPIC_TASK_COMMAND_RAW = '/task_command_raw'
+TOPIC_SAFETY_STATE = '/safety_state'
+TOPIC_EMERGENCY_STOP = '/emergency_stop'
 
 # =============================== VLM ===============================
 # VLMReportNode가 최종 사용자 보고문을 생성하는 service
