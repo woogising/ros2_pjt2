@@ -12,6 +12,7 @@
 # ============================================================
 # workspace/workspace_judge_utils.py
 from .grid_allocator import allocate_placements, ALIGN_ANGLE_DEG
+from .grid_allocator import allocate_tidy  # 구역 내 재정렬(tidy) 배정
 
 # footprint 계산이 실패해 width/length가 없을 때 배치에 쓸 기본 물체 크기(mm).
 DEFAULT_OBJECT_SIZE_MM = 60.0
@@ -152,9 +153,13 @@ def judge_workspace(objects, frame: str, zone_rules):
                 )
             )
 
-    # 오배치 물체들의 최종 place 좌표를 그리드로 사전계산해 place_position/place_angle을 채운다.
-    # (구역 중앙 단일 배치 → 물체끼리 안 겹치는 그리드 줄 세우기)
+    # 오배치 물체들의 최종 place 좌표를 그리드로 사전계산해 place_position/place_angle을 채움.
+    # 구역 중앙 단일 배치 → 물체끼리 안 겹치는 그리드 줄 세우기
     apply_grid_placement(misplaced_objects, normal_objects)
+
+    # 구역 '안'에 있지만 그리드 슬롯에서 벗어난 정배치 물체도 코너부터 줄 세운다(재정렬).
+    # 재정렬 항목은 misplaced_objects '끝'에 붙어 오배치 이동이 끝난 뒤 실행된다.
+    apply_zone_tidy(misplaced_objects, normal_objects, unknown_rule_objects, frame)
 
     result = make_result_status(
         normal_objects,
@@ -212,6 +217,8 @@ def make_normal_object(detected_object, current_zone_name, expected_zone_name, e
         'center': detected_object.get('center'),
         'depth': detected_object.get('depth'),
         'position': detected_object.get('position'),
+        # 재정렬(tidy)로 다시 집을 때 손목 회전에 쓸 물체 각도(base, deg)
+        'angle': detected_object.get('angle'),
         # 그리드 점유 마킹용 크기(mm). 이미 올바른 자리를 차지하므로 그 위엔 안 놓는다.
         'width': detected_object.get('width'),
         'length': detected_object.get('length'),
@@ -322,6 +329,113 @@ def _size_or_default(value):
     except (TypeError, ValueError):
         pass
     return DEFAULT_OBJECT_SIZE_MM
+
+
+# 구역 안 정배치 물체들을 그리드 코너부터 줄 세우는 재정렬(tidy) 항목을 만든다.
+# 반드시 apply_grid_placement '뒤'에 호출한다(반입 물체의 새 슬롯을 피해야 하므로).
+# 만들어진 재정렬 항목은 misplaced_objects 끝에 append → 로봇 실행 순서가
+# [오배치 이동 먼저 → 재정렬 나중]이 되어, 떠날 물체가 비운 코너까지 채울 수 있다.
+def apply_zone_tidy(misplaced_objects, normal_objects, unknown_rule_objects, frame):
+    if not normal_objects:
+        return
+
+    # 재정렬 대상: 정배치 물체(현재 파지점이 곧 pick 위치)
+    tidy_inputs = []
+    for idx, obj in enumerate(normal_objects):
+        pos = obj.get('position') or {}
+        if pos.get('x') is None or pos.get('y') is None:
+            continue
+        tidy_inputs.append({
+            'name': str(idx),
+            'zone': obj.get('expected_zone'),
+            'x': float(pos['x']),
+            'y': float(pos['y']),
+            'width': _size_or_default(obj.get('width')),
+            'length': _size_or_default(obj.get('length')),
+        })
+
+    # 재정렬 '실행 시점'(오배치 이동 완료 후)에도 구역을 차지하고 있을 것들:
+    #   ① unknown 물체 — 안 움직이므로 현재 자리
+    #   ② 오배치 물체가 '새로 놓일' 자리 — place_position (배치 실패 fallback=zone 중앙 포함)
+    # 오배치 물체의 '현재' 자리는 그때쯤 비어 있으므로 넣지 않는다.
+    occupied = []
+    for obj in (unknown_rule_objects or []):
+        pos = obj.get('position') or {}
+        zone = obj.get('current_zone')
+        if zone not in DEFAULT_ZONES or pos.get('x') is None or pos.get('y') is None:
+            continue
+        occupied.append({
+            'zone': zone,
+            'x': float(pos['x']),
+            'y': float(pos['y']),
+            'width': _size_or_default(obj.get('width')),
+            'length': _size_or_default(obj.get('length')),
+        })
+    for obj in misplaced_objects:
+        place = obj.get('place_position') or {}
+        zone = obj.get('expected_zone')
+        if zone not in DEFAULT_ZONES or place.get('x') is None or place.get('y') is None:
+            continue
+        occupied.append({
+            'zone': zone,
+            'x': float(place['x']),
+            'y': float(place['y']),
+            'width': _size_or_default(obj.get('width')),
+            'length': _size_or_default(obj.get('length')),
+        })
+
+    results = allocate_tidy(tidy_inputs, occupied_footprints=occupied)
+
+    # 반드시 '배정 순서'(results 순서 = 코너 가까운 순)대로 append 한다.
+    # 앞 순번이 비운 자리를 뒤 순번이 쓸 수 있는 건 이 실행 순서가 지켜질 때만 안전하다.
+    for r in results:
+        # 슬롯 배정 성공 + 허용오차 초과(이동 필요)인 물체만 재정렬 항목으로 만든다.
+        if not r.get('placed') or not r.get('moved'):
+            continue
+        obj = normal_objects[int(r['name'])]
+        misplaced_objects.append(make_realign_object(obj, r, frame))
+
+
+# 재정렬 이동 항목을 오배치(misplaced)와 같은 형식으로 만든다.
+# dict 모양이 같아 task_manager/robot_arm이 수정 없이 그대로 처리한다.
+def make_realign_object(normal_object, tidy_result, frame):
+    return {
+        'name': normal_object.get('name'),
+        'class_id': normal_object.get('class_id'),
+        'confidence': normal_object.get('confidence'),
+        'box': normal_object.get('box'),
+        'center': normal_object.get('center'),
+        'depth': normal_object.get('depth'),
+
+        # 현재 위치가 곧 pick 위치
+        'position': normal_object.get('position'),
+        'pick_position': normal_object.get('position'),
+
+        # 파지 시 손목 회전용 물체 각도(base, deg)
+        'angle': normal_object.get('angle'),
+
+        'width': normal_object.get('width'),
+        'length': normal_object.get('length'),
+
+        # 같은 구역 안 이동이므로 current == expected
+        'current_zone': normal_object.get('current_zone'),
+        'expected_zone': normal_object.get('expected_zone'),
+        'expected_zone_label': normal_object.get('expected_zone_label'),
+
+        # 재정렬 목표: 그리드 슬롯 중심, 주축 y평행
+        'place_position': {
+            'x': tidy_result['place_x'],
+            'y': tidy_result['place_y'],
+            'z': tidy_result['place_z'],
+        },
+        'place_angle': tidy_result['place_angle'],
+        'place_cell': tidy_result['cell'],
+        'place_failed': False,
+        'place_frame': frame,
+
+        # 올바른 구역이지만 그리드 슬롯에서 벗어나 다시 줄 세우는 물체
+        'reason': 'untidy_in_zone',
+    }
 
 
 # 정상 물체, 오배치 물체, 규칙 미정 물체 목록을 기준으로 전체 판단 상태를 만드는 함수

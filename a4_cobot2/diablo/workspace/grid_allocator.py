@@ -30,6 +30,7 @@ GRIPPER_CLEARANCE_GRASP = 20.0  # 파지 축(x) clearance (mm)
 GRIPPER_CLEARANCE_ALIGN = 12.0  # 정렬 축(y) clearance (mm)
 PLACE_Z = 14.0                  # 놓는 높이 (기존 zone place_position.z)
 ALIGN_ANGLE_DEG = 90.0          # 물체 주축을 base +y와 평행하게 두는 목표 각(base)
+TIDY_TOLERANCE_MM = 30.0        # 재정렬 허용오차(mm): 배정 슬롯 중심에서 이보다 멀면 다시 집어 줄 세운다
 
 # --- 구역 기하 + 시작 코너(교차점에 가장 가까운 코너) + 배치 방향 (§3) ---
 # corner_x/y : 채우기를 시작하는 코너의 base 좌표
@@ -72,9 +73,9 @@ def _mark(occ, i, j, cx, cy):
         for ii in range(i, i + cx):
             occ[ii][jj] = True
 
-
+# base 좌표가 속한 셀 인덱스(코너 기준). s=+1/-1 배치 방향.
 def _cell_of(coord, corner, s, cell):
-    """base 좌표가 속한 셀 인덱스(코너 기준). s=+1/-1 배치 방향."""
+    
     return int(math.floor(s * (coord - corner) / cell))
 
 
@@ -187,6 +188,158 @@ def _failed(obj, zone):
         "place_angle": None,
         "cell": None,
     }
+
+
+# ============================================================
+# 재정렬(tidy): 구역 '안'에 이미 올바르게 있는 물체들을
+# 코너부터 그리드에 다시 줄 세우기 위한 배정 계획
+# ============================================================
+
+def _footprint_cells(zone, x, y, width, length):
+    """(x, y) 중심 footprint(+clearance)가 덮는 셀 목록 [(i, j), ...]을 반환한다.
+    _mark_placed_object와 같은 계산이지만, 마킹 해제(자기 자리 제외)에도 쓰도록 목록을 돌려준다."""
+    z = ZONES[zone]
+    cell_x, cell_y = _cell_size(zone)
+    hx = (float(width) + GRIPPER_CLEARANCE_GRASP) / 2.0
+    hy = (float(length) + GRIPPER_CLEARANCE_ALIGN) / 2.0
+
+    i0 = _cell_of(x - hx, z["corner_x"], z["sx"], cell_x)
+    i1 = _cell_of(x + hx, z["corner_x"], z["sx"], cell_x)
+    j0 = _cell_of(y - hy, z["corner_y"], z["sy"], cell_y)
+    j1 = _cell_of(y + hy, z["corner_y"], z["sy"], cell_y)
+
+    cells = []
+    for i in range(max(0, min(i0, i1)), min(GRID_DIVISIONS - 1, max(i0, i1)) + 1):
+        for j in range(max(0, min(j0, j1)), min(GRID_DIVISIONS - 1, max(j0, j1)) + 1):
+            cells.append((i, j))
+    return cells
+
+
+def allocate_tidy(tidy_objects, occupied_footprints=None):
+    """구역 안 정배치 물체들을 코너부터 그리드에 줄 세우는 재정렬 계획을 만든다.
+
+    tidy_objects: [{name, zone, x, y, width, length}, ...]
+        지금 그 구역에 올바르게 있는 물체(x, y = 현재 파지점 base 좌표 mm).
+    occupied_footprints: [{zone, x, y, width, length}, ...]
+        재정렬 '실행 시점'(오배치 이동이 끝난 뒤)에도 그 구역을 차지할 것들:
+        unknown 물체의 현재 자리, 반입될 오배치 물체의 '새' 슬롯 등.
+        오배치로 떠날 물체의 현재 자리는 넣지 않는다 → 비워진 코너까지 채운다.
+
+    반환: [{name, zone, placed, moved, place_x, place_y, place_z, place_angle, cell}, ...]
+        moved=False : 배정 슬롯 중심에서 TIDY_TOLERANCE_MM 이내라 이동 불필요
+        placed=False: 빈 슬롯을 못 찾음 → 현 위치 유지
+
+    충돌 안전성: 코너 가까운 순으로 배정하며, 아직 안 움직인 다른 물체의 현재 자리는
+    항상 점유로 취급한다. 먼저 배정된 물체가 비운 자리만 뒤 순번이 쓸 수 있고,
+    실행 순서 = 배정 순서이므로 로봇이 옮기는 시점엔 그 자리가 실제로 비어 있다.
+    """
+    occupied_footprints = occupied_footprints or []
+
+    by_zone = {}
+    for obj in tidy_objects:
+        by_zone.setdefault(obj["zone"], []).append(obj)
+
+    results = []
+    for zone, objs in by_zone.items():
+        if zone not in ZONES:
+            for obj in objs:
+                results.append(dict(_failed(obj, zone), moved=False))
+            continue
+
+        cell_x, cell_y = _cell_size(zone)
+        occ = [[False] * GRID_DIVISIONS for _ in range(GRID_DIVISIONS)]
+
+        # 실행 시점에도 남아 있을 점유물(unknown, 반입 슬롯 등) 마킹
+        for p in occupied_footprints:
+            if p.get("zone") == zone:
+                _mark_placed_object(occ, zone, p)
+
+        # 구역 내 물체들의 현재 자리도 전부 마킹(자기 차례에 자기 것만 잠시 뺀다)
+        own_cells = {}
+        for obj in objs:
+            cells = _footprint_cells(zone, float(obj["x"]), float(obj["y"]),
+                                     obj["width"], obj["length"])
+            own_cells[id(obj)] = cells
+            for (i, j) in cells:
+                occ[i][j] = True
+
+        # 코너에서 가까운 순으로 배정 → 정렬된 장면을 재스캔해도 같은 슬롯이 배정돼
+        # (허용오차 이내 → skip) 불필요한 재이동이 생기지 않는다.
+        z = ZONES[zone]
+        ordered = sorted(objs, key=lambda o: math.hypot(float(o["x"]) - z["corner_x"],
+                                                        float(o["y"]) - z["corner_y"]))
+
+        cursor_i = 0
+        cursor_j = 0
+        row_height = 0
+
+        for obj in ordered:
+            cx = _cells_for_size(float(obj["width"]), GRIPPER_CLEARANCE_GRASP, cell_x)
+            cy = _cells_for_size(float(obj["length"]), GRIPPER_CLEARANCE_ALIGN, cell_y)
+
+            # 자기 현재 자리는 장애물에서 잠시 제외(제자리 물체가 자기 슬롯을 배정받게)
+            for (i, j) in own_cells[id(obj)]:
+                occ[i][j] = False
+
+            spot = None
+            while cursor_j + cy <= GRID_DIVISIONS:
+                if cursor_i + cx > GRID_DIVISIONS:
+                    cursor_j += row_height if row_height > 0 else 1
+                    cursor_i = 0
+                    row_height = 0
+                    continue
+                if _block_free(occ, cursor_i, cursor_j, cx, cy):
+                    spot = (cursor_i, cursor_j)
+                    break
+                cursor_i += 1
+
+            if spot is None:
+                # 슬롯 없음 → 현 위치 유지. 자리 마킹 원복(뒤 순번이 침범하지 않게)
+                for (i, j) in own_cells[id(obj)]:
+                    occ[i][j] = True
+                results.append(dict(_failed(obj, zone), moved=False))
+                continue
+
+            i, j = spot
+            place_x, place_y = _place_center(zone, i, j, cx, cy)
+            dist = math.hypot(float(obj["x"]) - place_x, float(obj["y"]) - place_y)
+
+            if dist <= TIDY_TOLERANCE_MM:
+                # 이미 제자리 → 이동 불필요. 현재 자리 마킹 원복(커서는 자연히 지나감)
+                for (ii, jj) in own_cells[id(obj)]:
+                    occ[ii][jj] = True
+                results.append({
+                    "name": obj.get("name"),
+                    "zone": zone,
+                    "placed": True,
+                    "moved": False,
+                    "place_x": place_x,
+                    "place_y": place_y,
+                    "place_z": PLACE_Z,
+                    "place_angle": ALIGN_ANGLE_DEG,
+                    "cell": (i, j, cx, cy),
+                })
+                continue
+
+            # 이동 배정: 새 슬롯 마킹. 옛 자리는 비워둬 뒤 순번이 쓸 수 있다
+            # (실행 순서 = 배정 순서라 로봇이 옮길 땐 실제로 비어 있음).
+            _mark(occ, i, j, cx, cy)
+            results.append({
+                "name": obj.get("name"),
+                "zone": zone,
+                "placed": True,
+                "moved": True,
+                "place_x": place_x,
+                "place_y": place_y,
+                "place_z": PLACE_Z,
+                "place_angle": ALIGN_ANGLE_DEG,
+                "cell": (i, j, cx, cy),
+            })
+
+            cursor_i = i + cx
+            row_height = max(row_height, cy)
+
+    return results
 
 
 if __name__ == "__main__":
