@@ -39,6 +39,7 @@ from task_manager.task_config import (
     TOPIC_TASK_COMMAND,
     TOPIC_TASK_STATUS,
     TOPIC_USER_NOTICE,
+    TOPIC_WORKSPACE_JUDGEMENT,
     TOPIC_WORKSPACE_SCAN_MODE,
 )
 from task_manager.payload_utils import (
@@ -113,6 +114,14 @@ class TaskManagerNode(Node):
         self.workspace_scan_mode_pub = self.create_publisher(
             String,
             TOPIC_WORKSPACE_SCAN_MODE,
+            self.workspace_scan_mode_qos,
+        )
+
+        # WorkspaceJudgeNode의 최신 판단 결과를 HMI가 바로 표시할 수 있도록 발행합니다.
+        # TRANSIENT_LOCAL을 사용해 HMI가 늦게 실행되어도 마지막 스캔 결과를 받을 수 있습니다.
+        self.workspace_judgement_pub = self.create_publisher(
+            String,
+            TOPIC_WORKSPACE_JUDGEMENT,
             self.workspace_scan_mode_qos,
         )
 
@@ -232,6 +241,16 @@ class TaskManagerNode(Node):
 
         self.workspace_scan_mode_pub.publish(msg)
         self.get_logger().info(f'Published /workspace_scan_mode: {mode}')
+
+    # 최신 작업공간 판단 결과 JSON을 HMI에 발행하는 함수
+    def publish_workspace_judgement(self, judgement_payload):
+        msg = String()
+        msg.data = json.dumps(judgement_payload, ensure_ascii=False)
+        self.workspace_judgement_pub.publish(msg)
+        self.get_logger().info(
+            f'Published {TOPIC_WORKSPACE_JUDGEMENT}: result='
+            f'{judgement_payload.get("result", "unknown")}'
+        )
 
     # 작업공간 확인 명령을 받았을 때 ObjectDetectionNode에 물체 위치 요청을 시작하는 함수
     def handle_check_workspace(self):
@@ -393,6 +412,22 @@ class TaskManagerNode(Node):
         if len(self.detected_objects) == 0:
             self.get_logger().warn('감지된 물체가 없습니다.')
 
+            # HMI가 이전 스캔 결과를 계속 표시하지 않도록 빈 결과도 명시적으로 발행합니다.
+            self.publish_workspace_judgement({
+                'task': 'judge_workspace',
+                'frame': self.detected_objects_frame or 'base',
+                'result': 'no_objects',
+                'normal_objects': [],
+                'misplaced_objects': [],
+                'unknown_rule_objects': [],
+                'summary': {
+                    'normal_count': 0,
+                    'misplaced_count': 0,
+                    'unknown_rule_count': 0,
+                    'total_detected_count': 0,
+                },
+            })
+
             if self.current_task == Status.TASK_RECHECK_WORKSPACE:
                 self.publish_status(Status.RECHECK_NO_OBJECTS_DETECTED)
                 self.publish_user_notice(
@@ -464,6 +499,9 @@ class TaskManagerNode(Node):
             judgement_payload = parse_json_payload(response.judgement_json)
 
             self.get_logger().info(f'작업공간 판단 결과: {judgement_payload}')
+
+            # 최초 스캔과 재검증 모두 동일한 topic으로 HMI에 최신 현황을 전달합니다.
+            self.publish_workspace_judgement(judgement_payload)
 
             if task_at_request_time == Status.TASK_CHECK_WORKSPACE:
                 self.handle_initial_workspace_judgement_result(judgement_payload)

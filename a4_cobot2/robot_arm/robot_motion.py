@@ -40,7 +40,7 @@ ACC = 60
 APPROACH_Z_OFFSET_MM = 150.0
 
 # pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
-PICK_Z_OFFSET_MM = 33.0
+PICK_Z_OFFSET_MM = 22.0
 
 # 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
 # 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
@@ -272,7 +272,7 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
     
     if object_angle is not None:
 
-        rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
+        rot = object_angle #- 90 if object_angle >= 0 else object_angle + 90
         # 실기 보정: 그리퍼가 물체 각도와 어긋나면 GRIPPER_ANGLE_OFFSET_DEG로 맞춘다.
         # 방향(부호)이 반대로 돌면 아래 += 를 -= 로 바꾼다.
         rot += GRIPPER_ANGLE_OFFSET_DEG

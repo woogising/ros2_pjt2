@@ -29,6 +29,7 @@
 #   WAKE UP -> /voice_start: start
 # ============================================================
 
+import json
 import sys
 
 from PyQt5.QtWidgets import (
@@ -82,16 +83,13 @@ ZONE_INFO = {
     "D": {"title": "D Zone", "rule": "Rule: Drinks", "class_names": ["pocari", "gatorade"]},
 }
 
-ITEM_ORDER = [
-    "hammer",
-    "screwdriver",
-    "bolt",
-    "tape",
-    "green_apple",
-    "pineapple",
-    "pocari",
-    "gatorade",
-]
+ZONE_DISPLAY_MAP = {
+    "red": "A",
+    "blue": "B",
+    "green": "C",
+    "yellow": "D",
+    "outside_workspace": "OUT",
+}
 
 
 def get_item_display_name(class_name):
@@ -106,6 +104,30 @@ def get_item_target_zone(class_name):
     if item is None:
         return "-"
     return item["zone"]
+
+
+def get_zone_display_name(zone_name):
+    if zone_name is None or str(zone_name).strip() == "":
+        return "-"
+    return ZONE_DISPLAY_MAP.get(str(zone_name), str(zone_name).upper())
+
+
+def make_object_identity(obj):
+    """normal/misplaced 목록에 동시에 들어가는 tidy 항목의 중복 표시를 막습니다."""
+    position = obj.get("position") or obj.get("pick_position") or {}
+
+    def rounded_value(key):
+        try:
+            return round(float(position.get(key)), 1)
+        except (TypeError, ValueError):
+            return None
+
+    return (
+        obj.get("name"),
+        rounded_value("x"),
+        rounded_value("y"),
+        rounded_value("z"),
+    )
 
 
 class StatusCard(QFrame):
@@ -331,12 +353,13 @@ class SortingRobotHMI(QWidget):
 
         self.table = QTableWidget()
         self.table.setObjectName("ObjectTable")
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(
-            ["Object", "YOLO Class", "Current Zone", "Target Zone", "Quantity", "Status"]
+            ["Object", "Current Zone", "Target Zone", "Quantity", "Status"]
         )
 
-        self.set_default_object_table()
+        # 스캔 전에는 임시 물체를 표시하지 않고 빈 표로 시작합니다.
+        self.clear_object_table()
 
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -451,6 +474,9 @@ class SortingRobotHMI(QWidget):
         self.ros_bridge.task_status_signal.connect(self.on_task_status_received)
         self.ros_bridge.user_notice_signal.connect(self.on_user_notice_received)
         self.ros_bridge.safety_state_signal.connect(self.on_safety_state_received)
+        self.ros_bridge.workspace_judgement_signal.connect(
+            self.on_workspace_judgement_received
+        )
         self.ros_bridge.detection_image_signal.connect(self.on_detection_image_received)
         self.ros_bridge.log_signal.connect(self.add_log)
 
@@ -548,7 +574,7 @@ class SortingRobotHMI(QWidget):
         self.status_cards["voice"].set_status("READY", "#38BDF8")
         self.status_cards["task"].set_status("READY", "#A78BFA")
         self.status_cards["safety"].set_status("UNKNOWN", "#FACC15")
-        self.set_default_object_table()
+        self.clear_object_table()
 
     def on_robot_voice_start_clicked(self):
         self.add_log("WAKE UP button clicked")
@@ -564,73 +590,107 @@ class SortingRobotHMI(QWidget):
 
         self.ros_bridge.publish_voice_start()
 
-    def set_default_object_table(self):
-        table_data = []
-
-        for class_name in ITEM_ORDER:
-            item = ITEM_CLASS_MAP[class_name]
-            target_zone = item["zone"]
-
-            table_data.append(
-                [
-                    item["display_name"],
-                    class_name,
-                    target_zone,
-                    target_zone,
-                    str(item["quantity"]),
-                    "READY",
-                ]
-            )
-
-        self.update_object_table(table_data)
+    def clear_object_table(self):
+        self.table.clearContents()
+        self.table.setRowCount(0)
 
     def update_object_table(self, table_data):
+        self.table.clearContents()
         self.table.setRowCount(len(table_data))
 
         for row, data in enumerate(table_data):
             for col, value in enumerate(data):
-                item = QTableWidgetItem(value)
+                item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignCenter)
 
-                if col == 5:
-                    item.setForeground(Qt.cyan)
+                if col == 4:
+                    status = str(value).upper()
+                    if status == "PLACED":
+                        item.setForeground(Qt.green)
+                    else:
+                        item.setForeground(Qt.red)
 
                 self.table.setItem(row, col, item)
 
-    def update_detected_objects_from_classes(self, class_names):
-        """
-        추후 object_detection_node 또는 task_manager_node가
-        YOLO class name 목록을 HMI로 전달할 때 사용할 수 있는 함수입니다.
+    def on_workspace_judgement_received(self, judgement_json):
+        """스캔과 구역 판단이 끝난 뒤 실제 물체 현황으로 표 전체를 교체합니다."""
+        try:
+            payload = json.loads(judgement_json)
+        except json.JSONDecodeError as exc:
+            self.add_log(f"/workspace_judgement JSON parse error: {exc}")
+            return
 
-        예:
-            class_names = ["hammer", "green_apple", "pocari"]
-        """
-        table_data = []
+        rows = {}
+        seen_objects = set()
 
-        for class_name in class_names:
-            mapping = ITEM_CLASS_MAP.get(class_name)
+        # normal_objects와 tidy용 misplaced_objects에 같은 물체가 들어갈 수 있으므로
+        # 물체 이름과 현재 3D 위치를 기준으로 한 번만 표시합니다.
+        object_groups = [
+            payload.get("normal_objects", []),
+            payload.get("misplaced_objects", []),
+            payload.get("unknown_rule_objects", []),
+        ]
 
-            if mapping is None:
-                table_data.append([class_name, class_name, "-", "-", "1", "UNKNOWN"])
+        for objects in object_groups:
+            if not isinstance(objects, list):
                 continue
 
-            target_zone = mapping["zone"]
+            for obj in objects:
+                if not isinstance(obj, dict):
+                    continue
 
-            table_data.append(
-                [
-                    mapping["display_name"],
-                    class_name,
-                    target_zone,
-                    target_zone,
-                    str(mapping["quantity"]),
-                    "DETECTED",
-                ]
-            )
+                identity = make_object_identity(obj)
+                if identity in seen_objects:
+                    continue
+                seen_objects.add(identity)
+
+                class_name = str(obj.get("name") or "unknown")
+                object_name = get_item_display_name(class_name)
+
+                current_zone_raw = obj.get("current_zone")
+                expected_zone_raw = obj.get("expected_zone")
+
+                current_zone = get_zone_display_name(current_zone_raw)
+                if expected_zone_raw is None:
+                    target_zone = get_item_target_zone(class_name)
+                else:
+                    target_zone = get_zone_display_name(expected_zone_raw)
+
+                is_placed = (
+                    current_zone_raw is not None
+                    and expected_zone_raw is not None
+                    and current_zone_raw == expected_zone_raw
+                )
+                status = "PLACED" if is_placed else "MISPLACED"
+
+                key = (object_name, current_zone, target_zone, status)
+                rows[key] = rows.get(key, 0) + 1
+
+        table_data = [
+            [object_name, current_zone, target_zone, str(quantity), status]
+            for (object_name, current_zone, target_zone, status), quantity
+            in sorted(rows.items(), key=lambda item: (item[0][0], item[0][1], item[0][3]))
+        ]
 
         self.update_object_table(table_data)
 
+        summary = payload.get("summary", {})
+        detected_count = summary.get("total_detected_count", len(seen_objects))
+        self.add_log(
+            f"/workspace_judgement: result={payload.get('result', 'unknown')}, "
+            f"objects={detected_count}, table_rows={len(table_data)}"
+        )
+
     def on_task_status_received(self, status):
         self.add_log(f"/task_status: {status}")
+
+        if status in {
+            "check_workspace_requested",
+            "checking_workspace",
+            "recheck_workspace_requested",
+            "rechecking_workspace",
+        }:
+            self.clear_object_table()
 
         display, color = self.convert_task_status(status)
         self.status_cards["task"].set_status(display, color)

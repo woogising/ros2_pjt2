@@ -31,6 +31,9 @@ TOPIC_TASK_STATUS = '/task_status'
 TOPIC_SAFETY_COMMAND = '/safety_command'
 TOPIC_USER_NOTICE = '/user_notice'
 
+# WorkspaceJudgeNode의 최신 판단 결과를 HMI에 전달하는 topic
+TOPIC_WORKSPACE_JUDGEMENT = '/workspace_judgement'
+
 # ObjectDetectionNode에게 이번 3자세 스캔이 최초 확인인지 재검증인지 알려주는 topic
 TOPIC_WORKSPACE_SCAN_MODE = '/workspace_scan_mode'
 

@@ -31,6 +31,7 @@
 import json
 import os
 import time
+from collections import Counter
 
 import cv2
 import numpy as np
@@ -66,10 +67,14 @@ PACKAGE_PATH = get_package_share_directory(PACKAGE_NAME)
 # annotated preview 이미지를 발행하는 주기(초). 값을 키우면 detector 추론 부하가 줄어든다.
 DETECTION_PREVIEW_PERIOD_SEC = 0.2
 
+# True일 때만 mask 중심/depth/camera/base 좌표를 detection별로 상세 출력합니다.
+# 평상시에는 False로 두어 스캔 로그가 과도하게 늘어나는 것을 방지합니다.
+DETECTION_COORD_DEBUG = False
+
 
 class ObjectDetectionNode(Node):
     # ObjectDetectionNode를 초기화하고 카메라 구독 노드, detector, ROS 통신 인터페이스를 준비한다.
-    def __init__(self, model_name="yolo"):
+    def __init__(self, model_name="ensemble"):
         super().__init__("object_detection_node")
 
         # ImgNode는 RealSense topic을 구독해서 최신 RGB/depth/camera_info를 보관합니다.
@@ -335,17 +340,21 @@ class ObjectDetectionNode(Node):
                 if image_record is not None:
                     self.scan_image_records.append(image_record)
 
+            # 기존에는 object마다 centroid를 한 줄씩 출력해,
+            # 중복 detection이 발생하면 수십~수백 줄이 출력되었습니다.
+            # 이제 자세별 전체 개수와 클래스별 개수만 한 줄로 요약합니다.
+            class_counts = Counter(
+                str(obj.get("name", "unknown"))
+                for obj in objects
+            )
+
             self.get_logger().info(
-                f"scan 자세 {index}: {len(objects)}개 감지 "
-                f"(누적 {len(self.scan_accumulator)}), "
+                f"scan 자세 {index + 1}/{total} 완료: "
+                f"objects={len(objects)}, "
+                f"classes={dict(class_counts)}, "
+                f"누적={len(self.scan_accumulator)}, "
                 f"scan_images={len(self.scan_image_records)}"
             )
-            for obj in objects:
-                centroid = obj["cloud"].mean(axis=0)
-                self.get_logger().info(
-                    f"  [자세{index}] {obj['name']}: {len(obj['cloud'])}pts, "
-                    f"centroid=({centroid[0]:.1f}, {centroid[1]:.1f}, {centroid[2]:.1f}) mm"
-                )
         except Exception as exc:
             self.get_logger().error(f"scan 자세 {index} 처리 실패: {exc}")
 
@@ -444,27 +453,34 @@ class ObjectDetectionNode(Node):
             if cloud is None or len(cloud) < 10:
                 continue
 
-            # [debug] 좌표 이상 조사용 임시 로그 ②: 단계별 좌표 비교
-            #   mask/depth 해상도 → mask 중심 픽셀 → 그 지점 depth → camera 좌표 → base 좌표
-            try:
-                ys_d, xs_d = np.where(mask > 0.5)
-                mcx, mcy = int(xs_d.mean()), int(ys_d.mean())
-                d_raw = float(depth_frame[mcy, mcx])
-                d_m = d_raw * 0.001 if d_raw > 10.0 else d_raw
-                fx, fy = self.intrinsics["fx"], self.intrinsics["fy"]
-                ppx, ppy = self.intrinsics["ppx"], self.intrinsics["ppy"]
-                cam = np.array([(mcx - ppx) * d_m / fx * 1000.0,
-                                (mcy - ppy) * d_m / fy * 1000.0,
-                                d_m * 1000.0, 1.0])
-                base_pt = base_to_camera_matrix @ cam
-                self.get_logger().info(
-                    f"  [debug] {detection.get('name')}: mask={mask.shape} depth={depth_frame.shape} "
-                    f"center_px=({mcx},{mcy}) depth={d_m:.3f}m "
-                    f"cam=({cam[0]:.0f},{cam[1]:.0f},{cam[2]:.0f})mm "
-                    f"base=({base_pt[0]:.0f},{base_pt[1]:.0f},{base_pt[2]:.0f})mm"
-                )
-            except Exception as exc:
-                self.get_logger().warn(f"  [debug] 로그 실패: {exc}")
+            # 좌표 이상을 조사할 때만 DETECTION_COORD_DEBUG=True로 바꿉니다.
+            # 평상시에는 detection별 상세 좌표 로그를 생략합니다.
+            if DETECTION_COORD_DEBUG:
+                try:
+                    ys_d, xs_d = np.where(mask > 0.5)
+                    mcx, mcy = int(xs_d.mean()), int(ys_d.mean())
+                    d_raw = float(depth_frame[mcy, mcx])
+                    d_m = d_raw * 0.001 if d_raw > 10.0 else d_raw
+                    fx, fy = self.intrinsics["fx"], self.intrinsics["fy"]
+                    ppx, ppy = self.intrinsics["ppx"], self.intrinsics["ppy"]
+                    cam = np.array([
+                        (mcx - ppx) * d_m / fx * 1000.0,
+                        (mcy - ppy) * d_m / fy * 1000.0,
+                        d_m * 1000.0,
+                        1.0,
+                    ])
+                    base_pt = base_to_camera_matrix @ cam
+                    self.get_logger().info(
+                        f"  [debug] {detection.get('name')}: "
+                        f"mask={mask.shape} depth={depth_frame.shape} "
+                        f"center_px=({mcx},{mcy}) depth={d_m:.3f}m "
+                        f"cam=({cam[0]:.0f},{cam[1]:.0f},{cam[2]:.0f})mm "
+                        f"base=({base_pt[0]:.0f},{base_pt[1]:.0f},{base_pt[2]:.0f})mm"
+                    )
+                except Exception as exc:
+                    self.get_logger().warn(
+                        f"  [debug] 좌표 로그 실패: {exc}"
+                    )
 
             objects.append({
                 "name": detection.get("name"),
@@ -485,9 +501,7 @@ class ObjectDetectionNode(Node):
         for name, item in merged.items():
             try:
                 (gx, gy, gz), top_ds = compute_top_center_grasp(item["cloud"])
-                # angle은 윗면 슬라이스(top_ds)가 아니라 전체 cloud로 계산한다.
-                # 망치 머리/드라이버 손잡이처럼 '가장 높은 부분'이 뭉툭하면
-                # 슬라이스가 길쭉하지 않아 PCA 긴 축/짧은 축이 뒤바뀐다(각도 90° 튐).
+
                 # 전체 발자국(손잡이+머리)은 확실히 길쭉해서 긴 축이 안정적으로 잡힌다.
                 angle = top_face_angle(item["cloud"])
                 # 그리드 배치용 물체 폭/길이(mm)도 전체 cloud 기준으로 계산한다.
