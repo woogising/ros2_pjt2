@@ -28,7 +28,6 @@ def generate_launch_description():
         'safety_node',
         'status_notifier_node',
         'command_input_node',
-        'db_node',
         'hmi_interface_node',
     ]
 
@@ -41,6 +40,41 @@ def generate_launch_description():
         )
         for executable in node_executables
     ]
+
+    nodes.append(
+            Node(
+                package='a4_cobot2',
+                executable='db_node',
+                name='db_node',
+                output='screen',
+                parameters=[{
+                    'db_path': '~/a4_cobot2_ws/a4_cobot2_log/cobot2_log.db',
+                    'enable_rosbag': True,
+                    'bag_path': '~/a4_cobot2_ws/a4_cobot2_log/bags',
+                    'bag_storage_id': 'sqlite3',
+                    'bag_startup_wait_sec': 0.7,
+                    'bag_stop_timeout_sec': 12.0,
+                    'bag_flush_delay_sec': 0.25,
+                    'bag_topics': [
+                        '/task_command',
+                        '/task_command_raw',
+                        '/task_status',
+                        '/user_notice',
+                        '/safety_command',
+                        '/safety_state',
+                        '/emergency_stop',
+                        '/workspace_scan_mode',
+                        '/scanned_objects_base',
+                        '/workspace_judgement',
+                        '/rosout',
+                        '/camera/camera/color/image_raw',
+                        '/camera/camera/aligned_depth_to_color/image_raw',
+                        '/camera/camera/color/camera_info',
+                    ],
+                }],
+            ),
+        )
+
 
     # VLM 최종 보고 노드.
     # TaskManagerNode가 재검증 결과를 받은 뒤 /generate_final_report service를 호출한다.

@@ -134,6 +134,19 @@ class DBManager:
             )
             self.conn.commit()
 
+    # 실제 rosbag 파일이 정상 생성된 뒤 task_runs에 경로를 연결하는 함수
+    def update_task_bag_path(self, run_id: str, bag_path: Optional[str]):
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE task_runs
+                SET bag_path = ?
+                WHERE run_id = ?
+                """,
+                (bag_path, run_id),
+            )
+            self.conn.commit()
+
     # 작업의 마지막 상태를 갱신하는 함수
     def update_task_status(self, run_id: str, final_status: str):
         with self._lock:

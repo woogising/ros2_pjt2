@@ -26,6 +26,7 @@ from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy, DurabilityPo
 from std_msgs.msg import Bool, String
 
 from database.db_manager import DBManager
+from database.rosbag_manager import RosbagManager
 
 try:
     from task_manager.task_config import (
@@ -113,6 +114,9 @@ DEFAULT_BAG_TOPICS = [
     '/safety_command',
     '/safety_state',
     '/emergency_stop',
+    '/workspace_scan_mode',
+    '/scanned_objects_base',
+    '/workspace_judgement',
     '/rosout',
     '/camera/camera/color/image_raw',
     '/camera/camera/aligned_depth_to_color/image_raw',
@@ -126,14 +130,35 @@ class DBNode(Node):
         super().__init__('db_node')
 
         self.declare_parameter('db_path', '~/a4_cobot2_ws/a4_cobot2_log/cobot2_log.db')
+        self.declare_parameter('enable_rosbag', True)
         self.declare_parameter('bag_path', '~/a4_cobot2_ws/a4_cobot2_log/bags')
         self.declare_parameter('bag_topics', DEFAULT_BAG_TOPICS)
+        self.declare_parameter('bag_storage_id', 'sqlite3')
+        self.declare_parameter('bag_startup_wait_sec', 0.7)
+        self.declare_parameter('bag_stop_timeout_sec', 12.0)
+        self.declare_parameter('bag_flush_delay_sec', 0.25)
 
         self.db_path = self.get_parameter('db_path').get_parameter_value().string_value
+        self.enable_rosbag = self.get_parameter('enable_rosbag').get_parameter_value().bool_value
         self.bag_path = self.get_parameter('bag_path').get_parameter_value().string_value
         self.bag_topics = self._get_string_array_parameter('bag_topics', DEFAULT_BAG_TOPICS)
+        self.bag_storage_id = self.get_parameter('bag_storage_id').get_parameter_value().string_value
+        self.bag_startup_wait_sec = self.get_parameter('bag_startup_wait_sec').get_parameter_value().double_value
+        self.bag_stop_timeout_sec = self.get_parameter('bag_stop_timeout_sec').get_parameter_value().double_value
+        self.bag_flush_delay_sec = self.get_parameter('bag_flush_delay_sec').get_parameter_value().double_value
 
         self.db = DBManager(self.db_path)
+        self.rosbag_manager = None
+        if self.enable_rosbag and self.bag_path.strip():
+            self.rosbag_manager = RosbagManager(
+                base_dir=self.bag_path,
+                topics=self.bag_topics,
+                storage_id=self.bag_storage_id,
+                startup_wait_sec=self.bag_startup_wait_sec,
+                stop_timeout_sec=self.bag_stop_timeout_sec,
+                flush_delay_sec=self.bag_flush_delay_sec,
+                logger=self.get_logger(),
+            )
 
         # current_run_id:
         #   현재 진행 중인 작업 ID입니다. /task_command가 들어올 때 생성됩니다.
@@ -199,8 +224,13 @@ class DBNode(Node):
         )
 
         self.get_logger().info(f'DBNode started. db_path={Path(self.db_path).expanduser()}')
-        if self.bag_path.strip():
-            self.get_logger().info(f'rosbag metadata will be linked with bag_path={self.bag_path}')
+        if self.rosbag_manager is not None:
+            self.get_logger().info(
+                f'Automatic rosbag enabled. base_dir={Path(self.bag_path).expanduser()}, '
+                f'topics={len(self.bag_topics)}'
+            )
+        else:
+            self.get_logger().info('Automatic rosbag disabled.')
 
     # 문자열 배열 파라미터를 안전하게 가져오는 함수
     def _get_string_array_parameter(self, name: str, default_value: List[str]) -> List[str]:
@@ -236,7 +266,7 @@ class DBNode(Node):
 
         return True
 
-    # command 이름을 기준으로 새 task_run을 시작하는 함수
+    # command 이름을 기준으로 새 task_run을 시작하고 rosbag 기록도 함께 시작하는 함수
     def start_new_run(self, command: str, raw_text: Optional[str], timestamp: Optional[str] = None):
         if timestamp is None:
             timestamp = self.now_iso()
@@ -253,56 +283,71 @@ class DBNode(Node):
         self.current_bag_id = None
         self.last_non_idle_status = None
 
-        bag_path = self.bag_path.strip() or None
-
+        # 먼저 DB 작업 행을 생성합니다. bag_path는 실제 rosbag 검증이 끝난 뒤 연결합니다.
         self.db.create_task_run(
             run_id=self.current_run_id,
             command=command,
             raw_text=raw_text,
             started_at=timestamp,
-            bag_path=bag_path,
+            bag_path=None,
         )
 
-        if bag_path is not None:
-            self.current_bag_id = f'bag_{self.current_run_id}'
-            self.db.upsert_bag_record(
-                bag_id=self.current_bag_id,
-                run_id=self.current_run_id,
-                bag_path=bag_path,
-                started_at=timestamp,
-                ended_at=None,
-                topics=self.bag_topics,
-            )
+        if self.rosbag_manager is not None:
+            start_result = self.rosbag_manager.start(self.current_run_id)
+            if start_result.success:
+                self.current_bag_id = f'bag_{self.current_run_id}'
+                self.get_logger().info(
+                    f'Rosbag linked to active run: run_id={self.current_run_id}, '
+                    f'bag_path={start_result.bag_path}'
+                )
+            else:
+                self.get_logger().warn(
+                    f'Rosbag start failed. DB task logging continues without bag: '
+                    f'{start_result.message}'
+                )
 
         self.get_logger().info(f'Started task run: {self.current_run_id}, command={command}')
 
-    # 현재 task_run을 종료 처리하는 함수
+    # 현재 task_run을 종료하고 실제 생성이 확인된 rosbag만 DB에 연결하는 함수
     def finish_current_run(self, final_status: str, success: bool, memo: Optional[str] = None):
         if self.current_run_id is None:
             return
 
-        ended_at = self.now_iso()
+        run_id = self.current_run_id
+        task_ended_at = self.now_iso()
+
+        if self.current_bag_id is not None and self.rosbag_manager is not None:
+            stop_result = self.rosbag_manager.stop()
+
+            if stop_result.success and stop_result.bag_path is not None:
+                self.db.update_task_bag_path(run_id, stop_result.bag_path)
+                self.db.upsert_bag_record(
+                    bag_id=self.current_bag_id,
+                    run_id=run_id,
+                    bag_path=stop_result.bag_path,
+                    started_at=stop_result.started_at,
+                    ended_at=stop_result.ended_at,
+                    topics=self.bag_topics,
+                )
+                self.get_logger().info(
+                    f'Verified rosbag saved in DB: {stop_result.bag_path}'
+                )
+            else:
+                self.get_logger().warn(
+                    f'Rosbag was not added to bag_records because files were not verified: '
+                    f'{stop_result.message}'
+                )
 
         self.db.finish_task_run(
-            run_id=self.current_run_id,
-            ended_at=ended_at,
+            run_id=run_id,
+            ended_at=task_ended_at,
             final_status=final_status,
             success=success,
             memo=memo,
         )
 
-        if self.current_bag_id is not None and self.bag_path.strip():
-            self.db.upsert_bag_record(
-                bag_id=self.current_bag_id,
-                run_id=self.current_run_id,
-                bag_path=self.bag_path.strip(),
-                started_at=None,
-                ended_at=ended_at,
-                topics=self.bag_topics,
-            )
-
         self.get_logger().info(
-            f'Finished task run: {self.current_run_id}, final_status={final_status}, success={success}'
+            f'Finished task run: {run_id}, final_status={final_status}, success={success}'
         )
 
         self.current_run_id = None
@@ -432,13 +477,19 @@ class DBNode(Node):
             value=str(bool(msg.data)).lower(),
         )
 
-    # 노드 종료 전에 열려 있는 작업과 DB 연결을 정리하는 함수
+    # 노드 종료 전에 열려 있는 작업, rosbag 프로세스와 DB 연결을 정리하는 함수
     def close(self):
         if self.current_run_id is not None:
             self.finish_current_run(
                 final_status=self.last_non_idle_status or 'db_node_shutdown',
                 success=False,
                 memo='db_node closed while run was active',
+            )
+        elif self.rosbag_manager is not None and self.rosbag_manager.is_recording():
+            # 이론상 current_run 없이 recorder만 남지 않아야 하지만 방어적으로 종료합니다.
+            stop_result = self.rosbag_manager.stop()
+            self.get_logger().warn(
+                f'Orphan rosbag process was stopped during DBNode close: {stop_result.message}'
             )
 
         self.db.close()

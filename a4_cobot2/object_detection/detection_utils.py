@@ -212,22 +212,28 @@ def deproject_mask_to_base(mask, depth_frame, intrinsics, base_to_camera_matrix)
     return base_h[:3].T  # (N, 3) mm
 
 
-# 자세별로 모인 물체({name, cloud, ...})들을 이름 기준으로 포인트클라우드 concat한다.
-# (좌표를 평균내는 게 아니라 클라우드 자체를 합쳐 윗면 커버리지를 서로 보완한다.)
+# 자세별로 모인 물체({name, cloud, ...})들 중, bbox 면적 × confidence 점수가 가장 높은 자세 하나만 골라 사용한다.
+# (클라우드를 합치지 않고 그 자세의 cloud/box/confidence를 그대로 쓴다 → position/angle/size 전부 그 자세 기준.)
 def merge_clouds_by_name(items):
+    def pose_score(o):
+        b = o.get("box")
+        if b is None or len(b) != 4:
+            return 0.0
+        area = abs((b[2] - b[0]) * (b[3] - b[1]))
+        return area * float(o.get("confidence", 0.0))
+
     groups = {}
     for item in items:
         groups.setdefault(item["name"], []).append(item)
 
     merged = {}
     for name, group in groups.items():
-        best = max(group, key=lambda o: o.get("confidence", 0.0))
-        cloud = np.vstack([o["cloud"] for o in group])
+        best = max(group, key=pose_score)  # bbox 면적 × confidence 최고 자세 선택
         merged[name] = {
             "class_id": best["class_id"],
             "confidence": best["confidence"],
             "box": best["box"],
-            "cloud": cloud,
+            "cloud": best["cloud"],  # vstack 병합 대신 그 자세 cloud 하나만
             "count": len(group),
         }
     return merged

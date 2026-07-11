@@ -12,6 +12,7 @@
 #   - /user_notice 구독
 #   - /safety_state 구독
 #   - /yolo_detection_image 구독
+#   - /workspace_judgement 구독: 스캔 후 물건 배치 현황 JSON
 #
 # 현재 팀 구조 기준:
 #   command:
@@ -40,11 +41,13 @@ try:
         TOPIC_TASK_COMMAND,
         TOPIC_TASK_STATUS,
         TOPIC_USER_NOTICE,
+        TOPIC_WORKSPACE_JUDGEMENT,
     )
 except Exception:
     TOPIC_TASK_COMMAND = "/task_command"
     TOPIC_TASK_STATUS = "/task_status"
     TOPIC_USER_NOTICE = "/user_notice"
+    TOPIC_WORKSPACE_JUDGEMENT = "/workspace_judgement"
 
 
 TOPIC_SAFETY_STATE = "/safety_state"
@@ -104,6 +107,21 @@ class HmiRosNode(Node):
             safety_state_qos
         )
 
+        # task_manager_node -> HMI (최신 작업공간 판단 결과)
+        # 마지막 결과를 유지하는 publisher와 QoS를 맞춥니다.
+        workspace_judgement_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.workspace_judgement_sub = self.create_subscription(
+            String,
+            TOPIC_WORKSPACE_JUDGEMENT,
+            self.workspace_judgement_callback,
+            workspace_judgement_qos,
+        )
+
         # object_detection_node -> HMI (YOLO 인식 화면)
         self.detection_image_sub = self.create_subscription(
             Image,
@@ -145,6 +163,11 @@ class HmiRosNode(Node):
         if safety_state:
             self.bridge.safety_state_signal.emit(safety_state)
 
+    def workspace_judgement_callback(self, msg: String):
+        judgement_json = msg.data.strip()
+        if judgement_json:
+            self.bridge.workspace_judgement_signal.emit(judgement_json)
+
     def detection_image_callback(self, msg: Image):
         try:
             image = QImage(
@@ -163,6 +186,7 @@ class HmiRosBridge(QThread):
     task_status_signal = pyqtSignal(str)
     user_notice_signal = pyqtSignal(str)
     safety_state_signal = pyqtSignal(str)
+    workspace_judgement_signal = pyqtSignal(str)
     detection_image_signal = pyqtSignal(QImage)
     log_signal = pyqtSignal(str)
     connected_signal = pyqtSignal(bool)
