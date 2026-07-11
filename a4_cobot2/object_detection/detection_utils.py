@@ -287,14 +287,10 @@ def top_face_angle(top_ds):
 
 
 # 전체 포인트클라우드를 주축(angle_deg 방향)/부축에 투영해 물체 폭/길이(mm)를 구한다.
-# (organize_grid_placement.md §5 footprint extent)
 #   width  = 짧은 축(부축=파지 축) 방향 범위
 #   length = 긴 축(주축) 방향 범위
-# 주의:
-#   - grasp 위치는 윗면 슬라이스지만 크기는 full footprint를 써야 한다.
-#     윗면만 쓰면 옆면이 좁은 물체에서 최대 폭보다 작게 나와 clearance가 부족해진다.
-#   - min-max가 아니라 robust percentile을 써서 flying pixel/노이즈 과대추정을 막는다.
-#   - angle_deg는 top_face_angle 결과(major_axis_angle)를 그대로 재사용한다.
+#   min-max가 아니라 robust percentile을 써서 flying pixel/노이즈 과대추정을 막는다.
+#   angle_deg는 top_face_angle 결과를 그대로 재사용한다.
 def footprint_extent(points_base, angle_deg, percentile=(2.0, 98.0)):
     pts = np.asarray(points_base)
     if angle_deg is None or len(pts) < 3:

@@ -143,3 +143,154 @@ ros2 run rqt_image_view rqt_image_view /yolo_detection_image
 - **파지 각도**: `RZ_OFFSET`·회전 방향·하강 부호는 실기에서 튜닝 필요
 - **GRASP_ORIENTATION**: 실제 안전한 탑다운 집기 자세로 확정 필요
 - **한 구역에 2클래스**: 둘 다 오배치면 같은 중앙점에 놓여 겹칠 수 있음 (필요 시 슬롯 분리)
+
+---
+---
+
+# 코드 분석 — 잠재 오류점 & 개선 제안 (2026-07-11)
+
+전체 소스(약 8,500줄, 노드 10개)를 검토한 결과입니다.
+**심각도 순서**: ① 안전 → ② 시스템 멈춤(deadlock/crash) → ③ 동작 오류 → ④ 성능/자원 → ⑤ 빌드·설정·문서.
+
+## ① 안전 관련 (로봇이 위험해질 수 있는 것)
+
+### 1. `force_down()` 무한 루프 — `robot_motion.py:222~236`
+z축 외력이 6N을 넘을 때까지 `while True`로 대기하는데 **타임아웃도, 최대 하강 거리 제한도 없다.**
+- 잡은 물체를 도중에 떨어뜨렸거나, place 지점 아래에 지지면이 없으면 로봇이 힘제어로 계속 내려감.
+- 유일한 탈출구가 `_emergency` 플래그(음성 stop → 여러 홉 경유)뿐.
+- 추가 버그: emergency 분기에서 `release_force`/`release_compliance_ctrl`을 호출하고 break한 뒤, 루프 밖에서 **같은 해제 함수를 또 호출**(이중 해제 — DSR API에 따라 오류 발생 가능).
+
+**개선**: `시작 z - 현재 z > 한계값` 또는 경과 시간 타임아웃을 루프 탈출 조건에 추가하고, 해제 로직은 `finally` 한 곳으로 모은다.
+
+### 2. stop이 "진짜 정지"가 아님 — `robot_motion.py:97~114, 356`
+`safe_stop()`은 소프트 플래그만 세운다. `_wrap_motion_guard()`는 **다음** movel/movej를 막을 뿐, **이미 실행 중인 모션은 끊지 못한다** (주석에도 명시됨).
+- Doosan API의 `move_stop()` / `stop(DR_QSTOP)` 실제 호출이 없다.
+- 음성 "멈춰"의 실제 경로: wakeword 대기 → 녹음 3초 → Whisper → GPT 분류 → /task_command → task_manager → /safety_command → safety_node → /emergency_stop → robot_arm → 플래그. **최소 5~10초 지연.**
+
+**개선**: `safe_stop()`에서 `dsr.move_stop(dsr.DR_QSTOP)` 같은 즉시 정지 API를 함께 호출. "음성 정지는 편의 기능이고 진짜 비상정지는 물리 E-stop"임을 팀 내에 명확히.
+
+### 3. 새 작업 시작 시 E-stop 자동 해제 — `task_manager_node.py:275, 619`
+`start_workspace_detection()`과 `handle_start_organize()`가 시작하자마자 `SAFETY_COMMAND_CLEAR`를 자동 발행 → safety_node가 `/emergency_stop: False` 발행 → robot_arm이 `clear_stop()`.
+즉 **사용자가 "멈춰"라고 한 직후 "정리 시작해줘"라고만 하면 정지 상태가 소리 없이 풀린다.** 정지 원인이 해소됐는지 아무도 확인하지 않는다.
+
+**개선**: E-stop 해제는 명시적 clear 명령(별도 음성/HMI 버튼)으로만 하고, e-stop 활성 중 새 작업 명령은 "정지 상태입니다. 해제 후 다시 시도하세요"로 거부.
+
+### 4. 물체 파지 도중 정지/취소 시 복구 시나리오 없음 — `robot_arm_node.py:125~130`
+cancel/E-stop이 오면 남은 movel이 전부 스킵되는데, **그리퍼가 물체를 문 채로 공중에 정지**할 수 있다. 재시작 시 물체를 든 상태인지 아닌지 시스템이 모른다.
+
+## ② 시스템이 멈추거나 죽는 시나리오
+
+### 5. `is_busy` 영구 고착 (워치독 없음) — `task_manager_node.py`
+`is_busy=True`가 된 뒤 응답이 영영 안 오면 시스템 전체가 BUSY 응답만 하게 된다. 가능한 구멍:
+- `/start_workspace_scan` 서비스 호출 후 robot_arm이 movej에서 hang → future가 완료 안 됨 (스캔 서비스는 응답까지 3자세 전체를 동기 실행하는 구조라 최대 45초+).
+- `robot_organize_goal_response_callback`(513행)에서 `future.result()` 예외 미처리 → 콜백이 죽고 `finish_current_task()` 호출 안 됨.
+
+**개선**: 작업 시작 시 타임아웃 타이머(예: 90초)를 걸고, 만료 시 강제 `finish_current_task()` + 사용자 안내. goal response 콜백에 try/except 추가.
+
+### 6. 음성 노드가 예외 한 번에 죽음 — `command_input_node.py:246~267`
+`stt.speech2text()`(OpenAI 네트워크 오류), `command_classifier.classify()`(GPT 호출)가 예외를 던지면 main의 `except KeyboardInterrupt` 밖으로 나가 **command_input_node 프로세스가 종료**된다. 데모 중 Wi-Fi 순단 한 번이면 음성 입력 전체가 죽는다. **실전에서 가장 먼저 터질 지점.**
+
+**개선**: `process_voice_command_once()` 안에서 try/except로 감싸고 "일시적인 오류입니다. 다시 시도해주세요" TTS 후 대기 루프로 복귀.
+
+### 7. depth/카메라 없으면 무한 대기 — `detection.py:562~570`
+`_wait_for_valid_data()`는 데이터가 올 때까지 무한 spin. RealSense가 안 떠 있으면 노드 초기화(intrinsics 대기)에서 영원히 블록되고, 스캔 중 depth가 끊기면 `/scan_capture_done` ack가 안 나가 robot_arm 15초 타임아웃으로 이어진다.
+
+**개선**: 최대 재시도 횟수/시간을 두고 실패 시 명확한 에러 로그 + 해당 스캔 실패 처리.
+
+### 8. 스캔 ack 인덱스 미확인 레이스 — `robot_arm_node.py:365~367`
+`scan_done_callback`은 어떤 인덱스의 ack든 무조건 `event.set()`. 이전 스캔이 타임아웃으로 실패한 뒤 **늦게 도착한 ack**가 다음 스캔의 대기를 조기 해제할 수 있다 → 로봇이 detection 캡처 완료 전에 다음 자세로 이동 → 잘못된 자세에서 촬영된 데이터 사용.
+
+**개선**: `if msg.data == 기다리는 index: event.set()`으로 인덱스를 검사 (`_scan_ack_index` 변수가 이미 있는데 안 쓰고 있음).
+
+### 9. 그리퍼 연결 실패가 조용히 넘어감 — `onrobot.py:29~31`, `robot_motion.py:140`
+`ModbusClient.connect()` 반환값을 확인하지 않아 그리퍼 IP가 틀려도 `connect()`가 성공한 것처럼 지나가고, 첫 `grip_open()`에서야 예외/무동작이 발생한다. 또 `pymodbus.client.sync` import는 **pymodbus 2.x 전용**(3.x면 ImportError → robot_arm 전체 불능). requirements에 `pymodbus<3` 고정 필요.
+
+## ③ 동작이 틀릴 수 있는 로직 문제
+
+### 10. 같은 클래스 물체 2개면 좌표가 허공으로 — `detection_utils.py:217~233`
+`merge_clouds_by_name()`이 **이름 기준으로 포인트클라우드를 합치기** 때문에, 예를 들어 hammer가 2개면 두 클라우드가 하나로 합쳐져 grasp 중심이 두 물체 사이 허공이 된다. HMI도 quantity:1 가정. 현재 시스템 전체에 "클래스당 1개" 가정이 암묵적으로 깔려 있다.
+
+**개선**: 최소한 known limitation으로 명시. 제대로 하려면 base 좌표 거리 기반 클러스터링(예: 반경 80mm DBSCAN)으로 인스턴스를 분리한 뒤 이름+클러스터 단위로 병합.
+
+### 11. zone 좌표가 두 파일에 중복 정의 — `workspace_judge_utils.py:24` vs `grid_allocator.py:38`
+`DEFAULT_ZONES`(판정용)와 `ZONES`(그리드 배치용)에 같은 실측 좌표가 복붙되어 있다. **한쪽만 보정하면 "판정상 정상인데 배치 위치는 구역 밖" 같은 미묘한 어긋남**이 생긴다.
+
+**개선**: grid_allocator가 workspace_judge_utils의 zone 정의를 import(또는 공용 config 파일)하도록 단일화.
+
+### 12. 그리드 배치 실패 시 zone 중앙에 '무조건' 놓음 — `workspace_judge_utils.py:319~321`
+`place_failed=True`인 물체도 misplaced 목록에 남고 fallback place_position(zone 중앙)으로 로봇이 실제로 옮긴다. **중앙이 이미 점유돼 있어도 충돌 검사 없이 그 위에 놓을 수 있다.**
+
+**개선**: `place_failed=True`는 로봇 실행 목록에서 제외하고 "OO는 놓을 자리가 없어 정리하지 못했습니다"로 사용자에게 안내.
+
+### 13. TTS 안내음이 STT 녹음에 섞임 — `command_input_node.py:247~250` + `tts.py`
+tts.py가 edge-tts(비동기, 백그라운드 스레드)로 바뀌면서 `speak()`이 즉시 리턴한다. 합성에 네트워크 왕복이 걸리므로 "동작을 말씀해주세요" **재생이 1초 대기 후 시작되는 3초 녹음과 겹칠 수 있다** → 로봇 목소리가 STT에 입력되어 오인식. (RATE +80%로 빨라졌어도 근본 해결이 아님.)
+
+**개선**: `_synthesize_and_play`가 재생 완료 이벤트(threading.Event)를 set하게 하고, `wait_after_tts`에서 그 이벤트를 timeout과 함께 기다린다.
+
+### 14. STT 녹음 3초 고정 — `stt.py:40`
+"잘못 배치된 물건 치워줘" 같은 긴 문장은 잘릴 수 있다. 주석은 5초라는데 실제 3초(문서 불일치). VAD(무음 감지 종료) 또는 4~5초로 조정 권장. 임시 wav 파일도 `delete=False` 후 삭제하지 않아 /tmp에 누적된다.
+
+### 15. `PICK_Z_OFFSET_MM` 이중 정의 — `robot_motion.py:43` vs `robot_motion.py:300~303`
+모듈 상수(33.0)는 죽은 값이고 실제로는 함수 안에서 z>60이면 45, 아니면 30으로 하드코딩 분기한다. 튜닝 지점이 두 곳으로 갈라져 있어 상수만 고치면 아무 변화가 없다. → 분기 임계값과 두 오프셋을 모듈 상단 상수로 올리기.
+
+### 16. place 높이가 pick 높이를 따라감 — `robot_motion.py:294~296`
+`place_pose`의 z에 `pick_position['z']`를 사용한다. grid_allocator가 계산한 `place_z(14mm)`는 무시된다. force_down()으로 내려놓기 때문에 현재는 동작하지만, force_down이 실패하는 상황(문제 1)과 결합하면 위험하다.
+
+### 17. `yolo.py PCI_MAP()`에 self 누락 — `yolo.py:165`
+`def PCI_MAP(in_img, ratio)`로 정의되어 있어 `self.PCI_MAP(frame, 2.0)` 호출 시 in_img에 self가 들어간다(즉시 AttributeError). 호출처인 `get_best_detection()`은 현재 메인 흐름에서 안 쓰이지만, 디버깅용으로 되살리는 순간 터지는 지뢰. 2D 이미지 입력이면 `d` 변수 NameError도 있다.
+
+### 18. YOLO confidence 0.8 컷 — `yolo.py:210`
+`_aggregate_detections(confidence_threshold=0.8)`은 꽤 높다. 0.8 미만으로 잡힌 물체는 스캔에서 **아예 없는 물체**가 되어 "감지된 물체가 없습니다"로 흐른다(오배치 물체를 안 치우는 것보다 나쁠 수 있음 — 있는데 없다고 보고). 모델 성능에 맞춰 0.5~0.6으로 낮추고 대신 판정 단계에서 신뢰도를 활용하는 편이 안전.
+
+### 19. 재검증 무한 순환 가능성 — `task_manager_node.py:547~562`
+정리 성공 → 재검증 → 아직 misplaced 남음 → 사용자 "정리 시작" → 또 남음 → ... 반복 횟수 제한이나 "같은 물체가 2번 연속 실패하면 수동 처리 요청" 같은 로직이 없다. 파지 실패가 반복되는 물체에서 무한 루프성 사용자 경험이 된다.
+
+## ④ 성능/자원
+
+### 20. 유휴 상태에서도 0.2초마다 YOLO 추론 — `detection.py:67, 138`
+preview 타이머가 시스템이 아무것도 안 할 때도 초당 5회 추론을 돌린다. GPU/CPU를 상시 점유하고, **스캔 콜백과 같은 single-thread executor를 공유하므로 스캔 처리를 지연**시켜 robot_arm의 15초 ack 타임아웃 원인이 될 수 있다.
+**개선**: 스캔 중에는 preview 일시정지, 유휴 시 주기를 0.5~1초로 완화(ROS 파라미터화).
+
+### 21. wakeword 모델을 매번 재로드 — `wakeup_word.py:59~61`
+`set_stream()`이 호출될 때마다 openWakeWord `Model`을 새로 생성한다. 명령 1회 처리 후 대기 재진입 시마다 tflite 로드가 반복됨 → 생성자에서 1회만 로드.
+
+### 22. 마이크 OSError 시 무한 재시도 — `command_input_node.py:209~211, 280~284`
+`wait_for_wakeup()`이 False를 반환하면 main 루프가 즉시 다시 open_stream을 시도한다. 마이크가 없으면 로그 폭주 + CPU 낭비. 재시도 간 sleep/최대 횟수 필요.
+
+## ⑤ 빌드 · 설정 · 문서
+
+### 23. `.env` 없으면 colcon build 실패 — `setup.py:44~46`
+`data_files`에 `resource/.env`가 명시돼 있는데 `.gitignore`가 `.env`를 제외하므로 **새로 클론한 팀원은 빌드부터 실패**한다. → `.env.example`을 커밋하고, setup.py에서 `os.path.exists()` 조건부로 포함.
+
+### 24. 경로 하드코딩이 옛 워크스페이스 기준 — `detection.py:194`, `db_node.py:128~129`
+scan 이미지 저장 후보와 DB 기본 경로가 `~/a4_cobot2_ws/...`인데 현재 워크스페이스는 `~/ws_cobot2_pjt`. detection은 후보 부모 폴더가 없으면 cwd 기준으로 흘러가 launch 실행 위치에 따라 저장 위치가 바뀐다. 환경변수/파라미터 기본값을 현 워크스페이스 기준으로 정리.
+
+### 25. 문서·주석 불일치 (혼란 유발)
+- 이 문서 위쪽 TTS 섹션: `tts2.py`/`tts3.py`는 **현재 존재하지 않음** (tts.py가 edge-tts 버전으로 교체됨).
+- `README.md`: 초기 버전(get_3d_position, 테스트 모션) 기준이라 현재 구조(3자세 스캔, 그리드 배치, VLM 보고)와 크게 다름.
+- `detection.py` 헤더: "기본값은 EnsembleDetector" ← 실제 기본값은 `model_name="yolo"`(587행). ensemble을 쓰려면 코드 수정 필요 → ROS 파라미터로 빼면 좋음.
+- `workspace_judge_node.py` 헤더: "diablo/workspace_judge_node_dia.py" 복붙 흔적.
+- `yolo.py`: 모델 파일명 `yolo_seg_best_v2.pt`인데 resource에는 v4도 있음 — 최신 모델을 쓰는 게 맞는지 확인 필요.
+
+### 26. 기타 사소한 것
+- `db_node.py` 성공 판정 휴리스틱: `FAILURE_KEYWORDS`에 'remaining', 'busy', 'cancel' 포함 → "정상 종료했지만 물건이 남음"도 실패로 기록되어 통계가 왜곡될 수 있음.
+- `db_node`의 bag_records는 메타데이터만 기록하고 실제 `ros2 bag record`는 실행하지 않음(이름이 오해 소지).
+- `grid_allocator.py`의 `__main__` 자가테스트는 좋은 습관 — pytest로 승격해 zone 중복 정의(문제 11) 회귀 테스트로 쓰면 좋음.
+- 이 파일(cobot.md)은 `.gitignore`에 들어 있어 커밋되지 않는 로컬 문서임.
+
+---
+
+## 우선순위 요약
+
+| 순위 | 항목 | 파일 | 유형 |
+|---|---|---|---|
+| 1 | force_down 무한 루프 + 이중 해제 | robot_motion.py | 안전 |
+| 2 | stop이 실행 중 모션을 못 끊음 (move_stop 미호출) | robot_motion.py | 안전 |
+| 3 | 새 작업 시 E-stop 자동 해제 | task_manager_node.py | 안전 |
+| 4 | STT/LLM 예외 → 음성 노드 사망 | command_input_node.py | 크래시 |
+| 5 | is_busy 영구 고착 (워치독 없음) | task_manager_node.py | 멈춤 |
+| 6 | 스캔 ack 인덱스 미확인 레이스 | robot_arm_node.py | 동작 오류 |
+| 7 | 동일 클래스 2개 병합 → 허공 파지 | detection_utils.py | 동작 오류 |
+| 8 | zone 좌표 이중 정의 | workspace_judge_utils / grid_allocator | 동작 오류 |
+| 9 | TTS 안내음이 녹음에 혼입 | command_input_node.py + tts.py | 동작 오류 |
+| 10 | .env 빌드 의존 / 경로 하드코딩 / 문서 갱신 | setup.py 외 | 운영 |

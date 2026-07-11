@@ -40,7 +40,7 @@ ACC = 60
 APPROACH_Z_OFFSET_MM = 150.0
 
 # pick 시 최종 하강 높이 보정(mm). 물건 위를 살짝 잡으면(감지 z가 높으면) 값을 키워 더 내려가 잡는다.
-PICK_Z_OFFSET_MM = 35.0
+PICK_Z_OFFSET_MM = 33.0
 
 # 탑다운 파지 시 그리퍼 자세(posx의 rx, ry, rz).
 # 임시 값이므로 실제 집기 자세로 반드시 교체해야 한다.
