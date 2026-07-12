@@ -58,6 +58,7 @@ from .detection_utils import (
     compute_top_center_grasp,
     top_face_angle,
     footprint_extent,
+    save_pose_colored_cloud_ply,
 )
 
 
@@ -70,6 +71,10 @@ DETECTION_PREVIEW_PERIOD_SEC = 0.2
 # True일 때만 mask 중심/depth/camera/base 좌표를 detection별로 상세 출력합니다.
 # 평상시에는 False로 두어 스캔 로그가 과도하게 늘어나는 것을 방지합니다.
 DETECTION_COORD_DEBUG = False
+
+# True이면 3자세 스캔이 끝날 때 누적된 base point cloud를 자세별 색으로 하나의 .ply로 저장합니다.
+# CloudCompare/MeshLab/Open3D로 열어 3자세가 base 좌표계에서 얼마나 잘 겹치는지(정렬 품질) 확인용입니다.
+SAVE_SCAN_CLOUD_PLY = True
 
 
 class ObjectDetectionNode(Node):
@@ -333,6 +338,9 @@ class ObjectDetectionNode(Node):
 
         try:
             objects = self._scan_and_transform(base_to_camera_matrix)
+            # PLY 저장 시 자세별로 색을 구분하기 위해 이 자세 index를 각 물체에 태그한다.
+            for obj in objects:
+                obj["scan_pose_index"] = index
             self.scan_accumulator.extend(objects)
 
             if self.should_save_scan_images():
@@ -363,6 +371,9 @@ class ObjectDetectionNode(Node):
 
         # 마지막 자세까지 끝나면 클라우드 병합 → 윗면 중심 grasp 계산 후 발행.
         if index >= total - 1:
+            if SAVE_SCAN_CLOUD_PLY:
+                self.save_scan_cloud_ply()
+
             result_objects = self._build_grasp_objects(self.scan_accumulator)
             payload = make_scan_workspace_payload(
                 objects=result_objects,
@@ -491,6 +502,30 @@ class ObjectDetectionNode(Node):
             })
 
         return objects
+
+    # 누적된 3자세 cloud를 자세별 색으로 하나의 .ply로 저장한다(scan_image_dir에).
+    # 자세0=빨강, 1=초록, 2=파랑. 뷰어에서 색이 겹쳐 보이면 base 좌표계 정렬이 잘 된 것이다.
+    def save_scan_cloud_ply(self):
+        clouds_by_pose = [
+            (obj.get("scan_pose_index", 0), obj["cloud"])
+            for obj in self.scan_accumulator
+            if obj.get("cloud") is not None
+        ]
+        if not clouds_by_pose:
+            self.get_logger().warn("저장할 scan cloud가 없어 .ply 저장을 건너뜁니다.")
+            return
+
+        path = os.path.join(
+            self.scan_image_dir,
+            time.strftime("scan_cloud_%Y%m%d_%H%M%S.ply"),
+        )
+        try:
+            if save_pose_colored_cloud_ply(clouds_by_pose, path):
+                self.get_logger().info(f"3자세 scan cloud를 저장했습니다: {path}")
+            else:
+                self.get_logger().warn("scan cloud 저장에 실패했습니다(빈 cloud).")
+        except Exception as exc:
+            self.get_logger().warn(f"scan cloud .ply 저장 실패: {exc}")
 
     # 3자세에서 누적된 point cloud를 물체 이름 기준으로 병합한 뒤,
     # grasp position, 파지 angle, 그리드 배치용 width/length를 계산한다.

@@ -315,3 +315,33 @@ def footprint_extent(points_base, angle_deg, percentile=(2.0, 98.0)):
     length = float(np.percentile(proj_major, hi) - np.percentile(proj_major, lo))
     width = float(np.percentile(proj_minor, hi) - np.percentile(proj_minor, lo))
     return width, length
+
+
+# 자세별로 다른 색을 입힌 base point cloud를 하나의 .ply로 저장한다(3자세 정렬 확인용).
+# clouds_by_pose: [(pose_index, cloud(N,3) mm), ...]
+# 자세0=빨강, 1=초록, 2=파랑 ... 색이 서로 겹쳐 보이면 3자세가 base 좌표계에서 잘 정렬된 것이다.
+# 좌표는 mm 그대로 저장한다(뷰어에서 상대 위치만 보면 되므로 단위 변환 불필요).
+def save_pose_colored_cloud_ply(clouds_by_pose, path):
+    pose_colors = [
+        [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0],
+        [1.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0],
+    ]
+
+    all_pts = []
+    all_col = []
+    for pose_index, cloud in clouds_by_pose:
+        cloud = np.asarray(cloud)
+        if cloud.ndim != 2 or len(cloud) == 0:
+            continue
+        color = pose_colors[int(pose_index) % len(pose_colors)]
+        all_pts.append(cloud)
+        all_col.append(np.tile(color, (len(cloud), 1)))
+
+    if not all_pts:
+        return False
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(np.vstack(all_pts))
+    pcd.colors = o3d.utility.Vector3dVector(np.vstack(all_col))
+    o3d.io.write_point_cloud(path, pcd)
+    return True
