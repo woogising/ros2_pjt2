@@ -3,12 +3,13 @@
 # 역할:
 #   - 최종 재검증 결과를 사용자에게 보고할 문장을 생성하는 VLM 보고 노드입니다.
 #   - TaskManagerNode가 /generate_final_report service를 호출하면,
-#     최신 RGB 이미지, YOLO annotated 이미지, workspace judgement JSON을 함께 사용해
+#     최신 RGB 이미지, 최종 앙상블 annotated 이미지, workspace judgement JSON을 함께 사용해
 #     GPT-4o 기반 최종 보고문을 생성합니다.
 #
 # 입력 topic:
 #   - /camera/camera/color/image_raw: 최종 작업공간 원본 RGB 이미지
-#   - /yolo_detection_image: YOLO bbox/mask/label이 그려진 이미지
+#   - /yolo_detection_image: 최종 YOLO+RT-DETR bbox와 SAM2/fallback mask가 그려진 이미지
+#     (topic 이름은 기존 HMI 호환을 위해 유지합니다.)
 #
 # Service:
 #   - /generate_final_report
@@ -31,6 +32,7 @@ from cv_bridge import CvBridge
 from dotenv import load_dotenv
 from openai import OpenAI
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy, DurabilityPolicy
 from sensor_msgs.msg import Image
 
 from od_msg.srv import GenerateReport
@@ -69,25 +71,33 @@ class VLMReportNode(Node):
         self.latest_raw_frame = None
 
         # latest_annotated_frame:
-        #   YOLO bbox/mask/label이 그려진 최신 이미지입니다.
+        #   최종 YOLO+RT-DETR bbox와 SAM2/fallback mask가 그려진 최신 이미지입니다.
         self.latest_annotated_frame = None
 
         self.zone_rules = get_default_zone_rules()
 
         self.client = self._create_openai_client()
 
+        # 영상 topic은 최신 1장만 사용하고 publisher와 동일한 QoS로 맞춥니다.
+        image_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
+
         self.raw_image_sub = self.create_subscription(
             Image,
             self.image_topic,
             self.raw_image_callback,
-            10,
+            image_qos,
         )
 
         self.annotated_image_sub = self.create_subscription(
             Image,
             self.annotated_image_topic,
             self.annotated_image_callback,
-            10,
+            image_qos,
         )
 
         self.report_srv = self.create_service(
@@ -100,6 +110,7 @@ class VLMReportNode(Node):
         self.get_logger().info(f'use_vlm={self.use_vlm}, model={self.model}')
         self.get_logger().info(f'image_topic={self.image_topic}')
         self.get_logger().info(f'annotated_image_topic={self.annotated_image_topic}')
+        self.get_logger().info('image_qos=BEST_EFFORT/depth1')
 
     # .env에서 OPENAI_API_KEY를 읽어 OpenAI client를 만드는 함수
     def _create_openai_client(self):
@@ -138,7 +149,7 @@ class VLMReportNode(Node):
         except Exception as exc:
             self.get_logger().warn(f'원본 이미지 변환 실패: {exc}')
 
-    # YOLO annotated 이미지 topic을 받아 최신 frame으로 저장하는 함수
+    # 최종 앙상블 annotated 이미지 topic을 받아 최신 frame으로 저장하는 함수
     def annotated_image_callback(self, msg: Image):
         try:
             self.latest_annotated_frame = self.bridge.imgmsg_to_cv2(
@@ -286,6 +297,7 @@ class VLMReportNode(Node):
                     'index': item.get('index'),
                     'total': item.get('total'),
                     'scan_mode': item.get('scan_mode'),
+                    'annotation_source': item.get('annotation_source', 'unknown'),
                     'has_raw_image': bool(item.get('raw_image_path')),
                     'has_annotated_image': bool(item.get('annotated_image_path')),
                 })
@@ -305,12 +317,13 @@ class VLMReportNode(Node):
 
 중요한 원칙:
 1. 로봇의 공식 판단은 JSON의 judgement_payload를 우선한다.
-2. 함께 제공되는 이미지는 로봇 정리 후 최종 재검증 3자세에서 실제로 촬영된 작업공간 이미지다.
-3. 이미지에서 JSON 판단과 명확히 모순되는 점이 보이면 단정하지 말고 "시각적으로는 추가 확인이 필요합니다"처럼 말한다.
-4. 로봇 동작 좌표, 픽셀 좌표, 내부 JSON 키 이름, 이미지 파일 경로는 사용자에게 말하지 않는다.
-5. 한국어로 짧고 자연스럽게 보고한다.
-6. 사용자가 듣는 TTS 문장이므로 2~4문장 정도로 말한다.
-7. 안전 문제, 가림, 겹침, 경계선 근처 배치처럼 불확실성이 있으면 마지막 문장에 확인 필요성을 말한다.
+2. 함께 제공되는 원본 이미지는 로봇 정리 후 최종 재검증 3자세에서 실제로 촬영된 작업공간 이미지다.
+3. annotated 이미지는 YOLO와 RT-DETR을 융합한 최종 bbox와 SAM2 또는 YOLO fallback 최종 mask를 표시한다.
+4. 이미지에서 JSON 판단과 명확히 모순되는 점이 보이면 단정하지 말고 "시각적으로는 추가 확인이 필요합니다"처럼 말한다.
+5. 로봇 동작 좌표, 픽셀 좌표, 내부 JSON 키 이름, 이미지 파일 경로는 사용자에게 말하지 않는다.
+6. 한국어로 짧고 자연스럽게 보고한다.
+7. 사용자가 듣는 TTS 문장이므로 2~4문장 정도로 말한다.
+8. 안전 문제, 가림, 겹침, 경계선 근처 배치처럼 불확실성이 있으면 마지막 문장에 확인 필요성을 말한다.
 
 입력 데이터:
 {json.dumps(compact_payload, ensure_ascii=False, indent=2)}
@@ -420,7 +433,10 @@ class VLMReportNode(Node):
             if annotated_url is not None:
                 user_content.append({
                     'type': 'text',
-                    'text': f'최종 재검증 자세 {pose_number}/{total} YOLO 표시 이미지입니다.',
+                    'text': (
+                        f'최종 재검증 자세 {pose_number}/{total} 최종 앙상블 표시 이미지입니다. '
+                        'bbox는 YOLO와 RT-DETR 융합 결과이며 mask는 SAM2 또는 YOLO fallback 결과입니다.'
+                    ),
                 })
                 user_content.append({
                     'type': 'image_url',
@@ -473,7 +489,10 @@ class VLMReportNode(Node):
             if annotated_image_url is not None:
                 user_content.append({
                     'type': 'text',
-                    'text': '최종 재검증 이미지 파일을 사용할 수 없어 최신 YOLO 표시 이미지를 대신 사용합니다.',
+                    'text': (
+                        '최종 재검증 이미지 파일을 사용할 수 없어 최신 최종 앙상블 표시 이미지를 대신 사용합니다. '
+                        'bbox는 YOLO와 RT-DETR 융합 결과이며 mask는 SAM2 또는 YOLO fallback 결과입니다.'
+                    ),
                 })
                 user_content.append({
                     'type': 'image_url',

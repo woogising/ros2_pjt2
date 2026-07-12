@@ -266,19 +266,19 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
 
     if _emergency:
         return False
-    GRASP_ORIENTATION = [90, 180, 90]
     if pick_position is None or place_position is None:
         raise ValueError(f'{object_name}의 pick 또는 place 위치가 없습니다.')
-    
-    if object_angle is not None:
 
-        rot = object_angle #- 90 if object_angle >= 0 else object_angle + 90
-        # 실기 보정: 그리퍼가 물체 각도와 어긋나면 GRIPPER_ANGLE_OFFSET_DEG로 맞춘다.
-        # 방향(부호)이 반대로 돌면 아래 += 를 -= 로 바꾼다.
-        rot += GRIPPER_ANGLE_OFFSET_DEG
-        GRASP_ORIENTATION[2] += rot
+    # pick 자세:
+    # 감지된 object_angle을 손목 RZ에 그대로 더하지 않고,
+    # 그리퍼 파지축이 물체 주축과 90도 차이나도록 보정한다.
+    # 좌/우 어느 쪽으로 90도 도는지는 2-finger gripper에서는 사실상 동일하므로,
+    # _grasp_orientation()의 기존 로직처럼 더 짧은 회전 방향을 사용한다.
+    GRASP_ORIENTATION = _grasp_orientation(object_angle)
+
+    if object_angle is not None:
         _node.get_logger().info(
-            f'[angle] object_angle={object_angle:.1f}, rot={rot:.1f}, rz={GRASP_ORIENTATION[2]:.1f}'
+            f'[angle] object_angle={object_angle:.1f}, pick_rz={GRASP_ORIENTATION[2]:.1f}'
         )
 
     # 놓을 때 손목자세: place_angle을 주면 그 각(그리드 y평행)으로, 없으면 pick 자세 그대로.

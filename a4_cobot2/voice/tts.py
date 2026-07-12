@@ -25,8 +25,8 @@ class TTS:
     #   RATE : 말 속도. 예) '+0%', '+20%', '-10%'
     #   PITCH: 음높이. 예) '+0Hz', '+20Hz', '-10Hz'
     VOICE = 'ko-KR-InJoonNeural'
-    RATE = '+80%'
-    PITCH = '+50Hz'
+    RATE = '+20%'
+    PITCH = '+30Hz'
 
     def __init__(self):
         pass
