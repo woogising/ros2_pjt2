@@ -125,58 +125,58 @@ class TaskManagerNode(Node):
             self.workspace_scan_mode_qos,
         )
 
-        # -------------------------
+
         # TaskManager 내부 상태 변수
-        # -------------------------
-        # current_task:
-        #   현재 진행 중인 큰 작업 이름입니다.
+
+        # current_task
+        #   현재 진행 중인 큰 작업 이름
         #   예: check_workspace, recheck_workspace, start_organize
-        #   비동기 service/action 응답이 늦게 돌아왔을 때, 이 값으로 오래된 응답인지 확인합니다.
+        #   비동기 service/action 응답이 늦게 돌아왔을 때, 이 값으로 오래된 응답인지 확인
         self.current_task = None
 
-        # is_busy:
-        #   한 번에 하나의 큰 작업만 처리하기 위한 플래그입니다.
-        #   True일 때 새 check_workspace/start_organize 명령이 들어오면 BUSY 상태를 발행합니다.
+        # is_busy
+        #   한 번에 하나의 큰 작업만 처리하기 위한 플래그
+        #   True일 때 새 check_workspace/start_organize 명령이 들어오면 BUSY 상태를 발행
         self.is_busy = False
 
-        # target_objects:
-        #   /scan_workspace에 넘길 탐지 대상 클래스 이름 목록입니다.
-        #   task_config.py의 TARGET_OBJECTS에서 가져옵니다.
+        # target_objects
+        #   /scan_workspace에 넘길 탐지 대상 클래스 이름 목록
+        #   task_config.py의 TARGET_OBJECTS에서 가져옴
         self.target_objects = TARGET_OBJECTS
 
-        # current_target_index:
-        #   과거 get_3d_position 반복 호출 구조에서 쓰던 인덱스입니다.
-        #   현재 /scan_workspace 단일 호출 구조에서는 거의 사용하지 않지만, 이전 구조 추적용으로 남아 있습니다.
+        # current_target_index
+        #   과거 get_3d_position 반복 호출 구조에서 쓰던 인덱스
+        #   현재 /scan_workspace 단일 호출 구조에서는 거의 사용하지 않지만, 이전 구조 추적용으로 남아 있음
         self.current_target_index = 0
 
-        # detected_objects:
-        #   ObjectDetectionNode의 /scan_workspace 응답에서 받은 물체 dict 목록입니다.
+        # detected_objects
+        #   ObjectDetectionNode의 /scan_workspace 응답에서 받은 물체 dict 목록
         #   각 원소 예: {'name': 'hammer', 'position': {'x': ..., 'y': ..., 'z': ...}, ...}
         self.detected_objects = []
 
-        # detected_objects_frame:
-        #   detected_objects의 position이 어떤 좌표계 기준인지 저장합니다.
-        #   현재 기본값은 camera_color_optical_frame입니다.
+        # detected_objects_frame
+        #   detected_objects의 position이 어떤 좌표계 기준인지 저장
+        #   현재 기본값은 camera_color_optical_frame
         self.detected_objects_frame = None
 
-        # scan_images:
-        #   ObjectDetectionNode가 최종 재검증 3자세 스캔 중 저장한 이미지 경로 목록입니다.
-        #   최초 확인 스캔에서는 비어 있고, 최종 VLM 보고 때만 사용합니다.
+        # scan_images
+        #   ObjectDetectionNode가 최종 재검증 3자세 스캔 중 저장한 이미지 경로 목록
+        #   최초 확인 스캔에서는 비어 있고, 최종 VLM 보고 때만 사용
         self.scan_images = []
 
-        # latest_workspace_judgement:
-        #   가장 최근의 workspace 판단 결과를 저장합니다.
-        #   start_organize 명령이 들어오면 여기서 misplaced_objects를 꺼내 robot_arm_node에 보냅니다.
+        # latest_workspace_judgement
+        #   가장 최근의 workspace 판단 결과를 저장
+        #   start_organize 명령이 들어오면 여기서 misplaced_objects를 꺼내 robot_arm_node에 보냄
         self.latest_workspace_judgement = None
 
-        # current_robot_goal_handle:
-        #   robot_arm_node에 보낸 organize action goal handle입니다.
-        #   stop 명령이 들어왔을 때 cancel_goal_async()를 호출하기 위해 저장합니다.
+        # current_robot_goal_handl
+        #   robot_arm_node에 보낸 organize action goal handle
+        #   stop 명령이 들어왔을 때 cancel_goal_async()를 호출하기 위해 저장
         self.current_robot_goal_handle = None
 
-        # stop_requested:
-        #   task_manager 레벨에서 현재 작업 흐름을 중단해야 하는지 나타내는 플래그입니다.
-        #   robot_arm의 실제 stop 상태는 /emergency_stop과 robot_motion 쪽에서 별도로 관리합니다.
+        # stop_requested
+        #   task_manager 레벨에서 현재 작업 흐름을 중단해야 하는지 나타내는 플래그
+        #   robot_arm의 실제 stop 상태는 /emergency_stop과 robot_motion 쪽에서 별도로 관리
         self.stop_requested = False
 
         self.get_logger().info('TaskManagerNode started.')

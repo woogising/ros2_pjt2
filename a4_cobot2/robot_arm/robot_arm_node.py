@@ -22,6 +22,7 @@ from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import Bool, Float64MultiArray, Int32
 from std_srvs.srv import Trigger
 from od_msg.action import OrganizeObjects
+from dsr_msgs2.srv import MoveStop
 
 from . import robot_motion as robot_motion
 
@@ -75,6 +76,15 @@ class RobotArmNode(Node):
             '/emergency_stop',
             self.emergency_stop_callback,
             self.emergency_stop_qos,
+            callback_group=self.callback_group
+        )
+
+        # 컨트롤러의 move_stop 서비스로 '실행 중인' 모션을 물리적으로 즉시 정지하기 위한 client.
+        # robot_motion의 stop 플래그는 다음 모션만 막으므로, 진행 중인 movel/movej는 이걸로 끊는다.
+        # (DSR 파이썬 래퍼를 거치지 않고 컨트롤러 노드를 직접 호출 → 블로킹/스레드 충돌 없음)
+        self.move_stop_client = self.create_client(
+            MoveStop,
+            f'/{robot_motion.ROBOT_ID}/motion/move_stop',
             callback_group=self.callback_group
         )
 
@@ -360,6 +370,17 @@ class RobotArmNode(Node):
             robot_motion.safe_stop()
         except Exception as e:
             self.get_logger().error(f'safe_stop_robot 처리 중 오류 발생: {e}')
+
+        # stop 플래그는 이미 실행 중인 모션을 끊지 못하므로,
+        # 컨트롤러 move_stop(DR_QSTOP)으로 진행 중인 모션을 즉시 정지한다.
+        # call_async라 응답을 기다리지 않으며, 정지 자체는 컨트롤러가 즉시 수행한다.
+        if self.move_stop_client.service_is_ready():
+            request = MoveStop.Request()
+            request.stop_mode = 1  # DR_QSTOP: Quick stop (Stop Category 2)
+            self.move_stop_client.call_async(request)
+            self.get_logger().warn('move_stop(DR_QSTOP) 요청을 보냈습니다.')
+        else:
+            self.get_logger().warn('move_stop 서비스 미연결 - 물리 정지를 생략합니다.')
 
     # detection이 특정 자세 캡처를 끝냈다는 ack를 받아 대기 중인 스캔 루프를 깨우는 함수
     def scan_done_callback(self, msg):

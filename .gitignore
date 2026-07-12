@@ -16,7 +16,7 @@ __pycache__/
 *.pt
 *.jpg
 !.env.example
-.pt
+*.pt
 
 
 .vscode/
@@ -26,4 +26,4 @@ Thumbs.db
 .env
 *.env
 cobot.md
-CHANGES.md
+

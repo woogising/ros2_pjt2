@@ -61,7 +61,7 @@ class YoloModel:
         aggregation_iou_threshold: float = 0.50,
         min_frame_ratio: float = 0.10,
         min_frame_support: int = 2,
-        confidence_threshold: float = 0.80,
+        confidence_threshold: float = 0.60,
     ):
         self.model = YOLO(YOLO_MODEL_PATH)
 
@@ -96,6 +96,8 @@ class YoloModel:
         )
 
         # YOLO raw detection을 집계에 넣기 위한 confidence 기준입니다.
+        # 0.8은 실제 있는 물체를 통째로 놓쳐 "감지된 물체가 없습니다"로 빠질 수 있어 0.6으로 낮췄습니다.
+        # 순간 오검출은 아래 min_frame_support 반복 감지 필터가 걸러줍니다.
         self.confidence_threshold = float(
             confidence_threshold
         )

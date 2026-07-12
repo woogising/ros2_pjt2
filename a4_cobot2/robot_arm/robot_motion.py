@@ -300,7 +300,7 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
     if pick_pose[2] > 60.00:
         PICK_Z_OFFSET_MM = 45.00
     else: 
-        PICK_Z_OFFSET_MM = 30.00
+        PICK_Z_OFFSET_MM = 25.00
     
     pick_pose[2] -= PICK_Z_OFFSET_MM
 
