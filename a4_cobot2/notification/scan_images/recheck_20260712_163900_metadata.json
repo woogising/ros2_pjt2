@@ -1,0 +1,300 @@
+{
+  "schema_version": 1,
+  "case_id": "recheck_20260712_163900",
+  "created_at": "2026-07-12T16:39:00",
+  "images": {
+    "raw": [
+      "recheck_20260712_163900_pose_1_of_3_raw.jpg",
+      "recheck_20260712_163900_pose_2_of_3_raw.jpg",
+      "recheck_20260712_163900_pose_3_of_3_raw.jpg"
+    ],
+    "annotated": [
+      "recheck_20260712_163900_pose_1_of_3_annotated.jpg",
+      "recheck_20260712_163900_pose_2_of_3_annotated.jpg",
+      "recheck_20260712_163900_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  "official_judgement": {
+    "task": "judge_workspace",
+    "frame": "base",
+    "result": "all_clear",
+    "normal_objects": [
+      {
+        "name": "green_apple",
+        "class_id": 2,
+        "confidence": 0.9660885453224182,
+        "box": [
+          710.0861206054688,
+          554.5432739257812,
+          876.0089721679688,
+          719.513671875
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 457.6111980202044,
+          "y": 66.7085408977428,
+          "z": 76.73449693327339
+        },
+        "angle": -48.58095265977792,
+        "width": 68.39557394077393,
+        "length": 69.94076313667566,
+        "current_zone": "green",
+        "expected_zone": "green",
+        "expected_zone_label": "green"
+      },
+      {
+        "name": "pocari",
+        "class_id": 1,
+        "confidence": 0.9397815942764283,
+        "box": [
+          420.6234436035156,
+          279.4766845703125,
+          574.76708984375,
+          413.20343017578125
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 466.7391228262704,
+          "y": -54.88103390959116,
+          "z": 145.07563048665406
+        },
+        "angle": 52.10135030926859,
+        "width": 45.15792784524669,
+        "length": 51.29880438474527,
+        "current_zone": "yellow",
+        "expected_zone": "yellow",
+        "expected_zone_label": "yellow"
+      },
+      {
+        "name": "screwdriver",
+        "class_id": 6,
+        "confidence": 0.8746243596076965,
+        "box": [
+          656.0855102539062,
+          55.73850631713867,
+          978.2153930664062,
+          120.40367126464844
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 541.4813077729605,
+          "y": 90.5499189303464,
+          "z": 35.70709825415442
+        },
+        "angle": 87.08278853048803,
+        "width": 22.232401001781177,
+        "length": 145.87439372532538,
+        "current_zone": "red",
+        "expected_zone": "red",
+        "expected_zone_label": "red"
+      },
+      {
+        "name": "tape",
+        "class_id": 7,
+        "confidence": 0.7899255990982055,
+        "box": [
+          458.29681396484375,
+          31.348339080810547,
+          566.41748046875,
+          140.14480590820312
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 540.3771637613258,
+          "y": -40.066375463225384,
+          "z": 44.35971661420702
+        },
+        "angle": 52.84922474023129,
+        "width": 40.469556756699866,
+        "length": 42.900950488910546,
+        "current_zone": "blue",
+        "expected_zone": "blue",
+        "expected_zone_label": "blue"
+      },
+      {
+        "name": "hammer",
+        "class_id": 3,
+        "confidence": 0.9506663918495178,
+        "box": [
+          645.1282348632812,
+          161.2620391845703,
+          1023.5133666992188,
+          301.5200500488281
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 611.003005288049,
+          "y": 89.99082268542656,
+          "z": 39.00265214729826
+        },
+        "angle": 87.24523762597725,
+        "width": 61.08259039411371,
+        "length": 176.8565147573583,
+        "current_zone": "red",
+        "expected_zone": "red",
+        "expected_zone_label": "red"
+      }
+    ],
+    "misplaced_objects": [],
+    "unknown_rule_objects": [],
+    "summary": {
+      "normal_count": 5,
+      "misplaced_count": 0,
+      "unknown_rule_count": 0,
+      "total_detected_count": 5
+    }
+  },
+  "detected_objects": [
+    {
+      "name": "green_apple",
+      "class_id": 2,
+      "confidence": 0.9660885453224182,
+      "box": [
+        710.0861206054688,
+        554.5432739257812,
+        876.0089721679688,
+        719.513671875
+      ],
+      "position": {
+        "x": 457.6111980202044,
+        "y": 66.7085408977428,
+        "z": 76.73449693327339
+      },
+      "angle": -48.58095265977792,
+      "width": 68.39557394077393,
+      "length": 69.94076313667566,
+      "major_axis_angle": -48.58095265977792,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "pocari",
+      "class_id": 1,
+      "confidence": 0.9397815942764283,
+      "box": [
+        420.6234436035156,
+        279.4766845703125,
+        574.76708984375,
+        413.20343017578125
+      ],
+      "position": {
+        "x": 466.7391228262704,
+        "y": -54.88103390959116,
+        "z": 145.07563048665406
+      },
+      "angle": 52.10135030926859,
+      "width": 45.15792784524669,
+      "length": 51.29880438474527,
+      "major_axis_angle": 52.10135030926859,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "screwdriver",
+      "class_id": 6,
+      "confidence": 0.8746243596076965,
+      "box": [
+        656.0855102539062,
+        55.73850631713867,
+        978.2153930664062,
+        120.40367126464844
+      ],
+      "position": {
+        "x": 541.4813077729605,
+        "y": 90.5499189303464,
+        "z": 35.70709825415442
+      },
+      "angle": 87.08278853048803,
+      "width": 22.232401001781177,
+      "length": 145.87439372532538,
+      "major_axis_angle": 87.08278853048803,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "tape",
+      "class_id": 7,
+      "confidence": 0.7899255990982055,
+      "box": [
+        458.29681396484375,
+        31.348339080810547,
+        566.41748046875,
+        140.14480590820312
+      ],
+      "position": {
+        "x": 540.3771637613258,
+        "y": -40.066375463225384,
+        "z": 44.35971661420702
+      },
+      "angle": 52.84922474023129,
+      "width": 40.469556756699866,
+      "length": 42.900950488910546,
+      "major_axis_angle": 52.84922474023129,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "hammer",
+      "class_id": 3,
+      "confidence": 0.9506663918495178,
+      "box": [
+        645.1282348632812,
+        161.2620391845703,
+        1023.5133666992188,
+        301.5200500488281
+      ],
+      "position": {
+        "x": 611.003005288049,
+        "y": 89.99082268542656,
+        "z": 39.00265214729826
+      },
+      "angle": 87.24523762597725,
+      "width": 61.08259039411371,
+      "length": 176.8565147573583,
+      "major_axis_angle": 87.24523762597725,
+      "detected_pose_count": 2
+    }
+  ],
+  "detected_objects_frame": "base",
+  "vlm_analysis": {
+    "source": "human_review_override",
+    "model": "gpt-4o",
+    "layout_status": "normal_clean",
+    "description": "green_apple, pocari, screwdriver, tape, hammer이(가) 정상 구역에 배치된 사용자 확인 정상 사례입니다.",
+    "report_text": "정상 배치로 확인된 기준 사례입니다.",
+    "confidence": 1.0
+  },
+  "retrieved_cases": [],
+  "vector_memory": {
+    "enabled": true,
+    "embedding_model": "openai/clip-vit-base-patch32",
+    "backend": "faiss_index_flat_ip",
+    "store_dir": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db",
+    "search_enabled": true,
+    "added_to_index": true,
+    "memory_error": null,
+    "index_status": "added",
+    "reference_scope": "normal_only",
+    "index_size": 4
+  },
+  "review_status": "approved",
+  "audit": {
+    "original_vlm_analysis_before_human_review": {
+      "source": "vlm",
+      "model": "gpt-4o",
+      "layout_status": "normal_clean",
+      "description": "모든 물체가 지정된 구역에 정확히 배치되어 있으며, 작업공간은 정돈된 상태입니다.",
+      "report_text": "모든 물건이 지정된 구역에 올바르게 배치되었습니다. 작업공간은 깔끔하게 정리되어 있습니다.",
+      "confidence": 0.95
+    }
+  },
+  "reference_label": {
+    "placement_status": "normal",
+    "visual_status": "normal_clean",
+    "source": "human_confirmed",
+    "description": "green_apple, pocari, screwdriver, tape, hammer이(가) 정상 구역에 배치된 사용자 확인 정상 사례입니다.",
+    "reviewed_at": "2026-07-12",
+    "note": "사용자가 이 재검증 사례를 정상 배치 기준 이미지로 확인했습니다."
+  }
+}

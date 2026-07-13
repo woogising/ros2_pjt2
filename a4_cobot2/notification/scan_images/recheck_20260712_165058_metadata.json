@@ -1,0 +1,435 @@
+{
+  "schema_version": 1,
+  "case_id": "recheck_20260712_165058",
+  "created_at": "2026-07-12T16:50:58",
+  "images": {
+    "raw": [
+      "recheck_20260712_165058_pose_1_of_3_raw.jpg",
+      "recheck_20260712_165058_pose_2_of_3_raw.jpg",
+      "recheck_20260712_165058_pose_3_of_3_raw.jpg"
+    ],
+    "annotated": [
+      "recheck_20260712_165058_pose_1_of_3_annotated.jpg",
+      "recheck_20260712_165058_pose_2_of_3_annotated.jpg",
+      "recheck_20260712_165058_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  "official_judgement": {
+    "task": "judge_workspace",
+    "frame": "base",
+    "result": "misplaced_found",
+    "normal_objects": [
+      {
+        "name": "green_apple",
+        "class_id": 2,
+        "confidence": 0.9649025559425354,
+        "box": [
+          709.9301147460938,
+          553.6472778320312,
+          876.4229125976562,
+          719.2014770507812
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 458.19248493848414,
+          "y": 66.9525196721675,
+          "z": 76.62785941969537
+        },
+        "angle": -44.80767805501458,
+        "width": 67.92847403728493,
+        "length": 70.29768584837217,
+        "current_zone": "green",
+        "expected_zone": "green",
+        "expected_zone_label": "green"
+      },
+      {
+        "name": "pineapple",
+        "class_id": 4,
+        "confidence": 0.9613961577415466,
+        "box": [
+          655.8885498046875,
+          1.542936086654663,
+          850.0376586914062,
+          158.66941833496094
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 343.9120918166682,
+          "y": 48.74823992590589,
+          "z": 130.62031451756584
+        },
+        "angle": 65.64411756720368,
+        "width": 45.33681896976201,
+        "length": 59.4866721600597,
+        "current_zone": "green",
+        "expected_zone": "green",
+        "expected_zone_label": "green"
+      },
+      {
+        "name": "gatorade",
+        "class_id": 1,
+        "confidence": 0.962614119052887,
+        "box": [
+          309.6852111816406,
+          81.45476531982422,
+          504.2708740234375,
+          254.11956787109375
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 391.9371849317066,
+          "y": -95.5321720123835,
+          "z": 145.8569727525565
+        },
+        "angle": 32.61202799517031,
+        "width": 45.82482720954314,
+        "length": 67.63825562068534,
+        "current_zone": "yellow",
+        "expected_zone": "yellow",
+        "expected_zone_label": "yellow"
+      },
+      {
+        "name": "hammer",
+        "class_id": 3,
+        "confidence": 0.9201526999473573,
+        "box": [
+          648.1312866210938,
+          47.254539489746094,
+          1047.0557861328125,
+          201.5481414794922
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 557.5648313965548,
+          "y": 95.70959567236618,
+          "z": 39.78326742233965
+        },
+        "angle": -89.49816081961521,
+        "width": 62.32458327294411,
+        "length": 177.3487336081211,
+        "current_zone": "red",
+        "expected_zone": "red",
+        "expected_zone_label": "red"
+      },
+      {
+        "name": "screwdriver",
+        "class_id": 6,
+        "confidence": 0.9087408781051636,
+        "box": [
+          685.0107421875,
+          645.1969604492188,
+          985.058349609375,
+          702.2520141601562
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 626.2239804173286,
+          "y": 88.62632130125748,
+          "z": 32.236704168837896
+        },
+        "angle": 80.01612044130691,
+        "width": 104.73258251261956,
+        "length": 140.3417947707323,
+        "current_zone": "red",
+        "expected_zone": "red",
+        "expected_zone_label": "red"
+      },
+      {
+        "name": "tape",
+        "class_id": 7,
+        "confidence": 0.7487865686416626,
+        "box": [
+          428.8199157714844,
+          26.398426055908203,
+          545.8986206054688,
+          139.21246337890625
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 543.5279070223631,
+          "y": -49.00128037212494,
+          "z": 46.09433874849081
+        },
+        "angle": 58.375260669088156,
+        "width": 40.211893005989495,
+        "length": 43.063685860441936,
+        "current_zone": "blue",
+        "expected_zone": "blue",
+        "expected_zone_label": "blue"
+      },
+      {
+        "name": "bolt",
+        "class_id": 0,
+        "confidence": 0.8469195365905762,
+        "box": [
+          501.2621154785156,
+          242.2877960205078,
+          557.8331909179688,
+          295.00274658203125
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 627.8470741032779,
+          "y": -38.91970428680543,
+          "z": 34.630054968833726
+        },
+        "angle": 74.56566479774061,
+        "width": 21.427262288050677,
+        "length": 24.31453392516181,
+        "current_zone": "blue",
+        "expected_zone": "blue",
+        "expected_zone_label": "blue"
+      }
+    ],
+    "misplaced_objects": [
+      {
+        "name": "gatorade",
+        "class_id": 1,
+        "confidence": 0.962614119052887,
+        "box": [
+          309.6852111816406,
+          81.45476531982422,
+          504.2708740234375,
+          254.11956787109375
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 391.9371849317066,
+          "y": -95.5321720123835,
+          "z": 145.8569727525565
+        },
+        "pick_position": {
+          "x": 391.9371849317066,
+          "y": -95.5321720123835,
+          "z": 145.8569727525565
+        },
+        "angle": 32.61202799517031,
+        "width": 45.82482720954314,
+        "length": 67.63825562068534,
+        "current_zone": "yellow",
+        "expected_zone": "yellow",
+        "expected_zone_label": "yellow",
+        "place_position": {
+          "x": 462.766,
+          "y": -50.633750000000006,
+          "z": 14.0
+        },
+        "place_angle": 90.0,
+        "place_cell": [
+          0,
+          0,
+          4,
+          5
+        ],
+        "place_failed": false,
+        "place_frame": "base",
+        "reason": "untidy_in_zone"
+      }
+    ],
+    "unknown_rule_objects": [],
+    "summary": {
+      "normal_count": 7,
+      "misplaced_count": 1,
+      "unknown_rule_count": 0,
+      "total_detected_count": 7
+    }
+  },
+  "detected_objects": [
+    {
+      "name": "green_apple",
+      "class_id": 2,
+      "confidence": 0.9649025559425354,
+      "box": [
+        709.9301147460938,
+        553.6472778320312,
+        876.4229125976562,
+        719.2014770507812
+      ],
+      "position": {
+        "x": 458.19248493848414,
+        "y": 66.9525196721675,
+        "z": 76.62785941969537
+      },
+      "angle": -44.80767805501458,
+      "width": 67.92847403728493,
+      "length": 70.29768584837217,
+      "major_axis_angle": -44.80767805501458,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "pineapple",
+      "class_id": 4,
+      "confidence": 0.9613961577415466,
+      "box": [
+        655.8885498046875,
+        1.542936086654663,
+        850.0376586914062,
+        158.66941833496094
+      ],
+      "position": {
+        "x": 343.9120918166682,
+        "y": 48.74823992590589,
+        "z": 130.62031451756584
+      },
+      "angle": 65.64411756720368,
+      "width": 45.33681896976201,
+      "length": 59.4866721600597,
+      "major_axis_angle": 65.64411756720368,
+      "detected_pose_count": 3
+    },
+    {
+      "name": "gatorade",
+      "class_id": 1,
+      "confidence": 0.962614119052887,
+      "box": [
+        309.6852111816406,
+        81.45476531982422,
+        504.2708740234375,
+        254.11956787109375
+      ],
+      "position": {
+        "x": 391.9371849317066,
+        "y": -95.5321720123835,
+        "z": 145.8569727525565
+      },
+      "angle": 32.61202799517031,
+      "width": 45.82482720954314,
+      "length": 67.63825562068534,
+      "major_axis_angle": 32.61202799517031,
+      "detected_pose_count": 3
+    },
+    {
+      "name": "hammer",
+      "class_id": 3,
+      "confidence": 0.9201526999473573,
+      "box": [
+        648.1312866210938,
+        47.254539489746094,
+        1047.0557861328125,
+        201.5481414794922
+      ],
+      "position": {
+        "x": 557.5648313965548,
+        "y": 95.70959567236618,
+        "z": 39.78326742233965
+      },
+      "angle": -89.49816081961521,
+      "width": 62.32458327294411,
+      "length": 177.3487336081211,
+      "major_axis_angle": -89.49816081961521,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "screwdriver",
+      "class_id": 6,
+      "confidence": 0.9087408781051636,
+      "box": [
+        685.0107421875,
+        645.1969604492188,
+        985.058349609375,
+        702.2520141601562
+      ],
+      "position": {
+        "x": 626.2239804173286,
+        "y": 88.62632130125748,
+        "z": 32.236704168837896
+      },
+      "angle": 80.01612044130691,
+      "width": 104.73258251261956,
+      "length": 140.3417947707323,
+      "major_axis_angle": 80.01612044130691,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "tape",
+      "class_id": 7,
+      "confidence": 0.7487865686416626,
+      "box": [
+        428.8199157714844,
+        26.398426055908203,
+        545.8986206054688,
+        139.21246337890625
+      ],
+      "position": {
+        "x": 543.5279070223631,
+        "y": -49.00128037212494,
+        "z": 46.09433874849081
+      },
+      "angle": 58.375260669088156,
+      "width": 40.211893005989495,
+      "length": 43.063685860441936,
+      "major_axis_angle": 58.375260669088156,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "bolt",
+      "class_id": 0,
+      "confidence": 0.8469195365905762,
+      "box": [
+        501.2621154785156,
+        242.2877960205078,
+        557.8331909179688,
+        295.00274658203125
+      ],
+      "position": {
+        "x": 627.8470741032779,
+        "y": -38.91970428680543,
+        "z": 34.630054968833726
+      },
+      "angle": 74.56566479774061,
+      "width": 21.427262288050677,
+      "length": 24.31453392516181,
+      "major_axis_angle": 74.56566479774061,
+      "detected_pose_count": 1
+    }
+  ],
+  "detected_objects_frame": "base",
+  "vlm_analysis": {
+    "source": "human_review_override",
+    "model": "gpt-4o",
+    "layout_status": "normal_untidy",
+    "description": "green_apple, pineapple, gatorade, hammer, screwdriver, tape, bolt이(가) 정상 구역에 배치된 사용자 확인 사례이며, 정돈 상태 비교용 정상 사례입니다.",
+    "report_text": "정상 배치로 확인된 기준 사례입니다.",
+    "confidence": 1.0
+  },
+  "retrieved_cases": [],
+  "vector_memory": {
+    "enabled": true,
+    "embedding_model": "openai/clip-vit-base-patch32",
+    "backend": "faiss_index_flat_ip",
+    "store_dir": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db",
+    "search_enabled": true,
+    "added_to_index": true,
+    "memory_error": null,
+    "index_status": "added",
+    "reference_scope": "normal_only",
+    "index_size": 5
+  },
+  "review_status": "approved",
+  "audit": {
+    "original_vlm_analysis_before_human_review": {
+      "source": "vlm",
+      "model": "gpt-4o",
+      "layout_status": "misplaced",
+      "description": "모든 물체가 지정된 구역에 배치되었으나 gatorade는 정돈이 필요합니다.",
+      "report_text": "작업 공간에 물체가 잘못 배치되어 있습니다. gatorade가 정리되지 않은 상태로 남아 있습니다.",
+      "confidence": 0.9
+    }
+  },
+  "reference_label": {
+    "placement_status": "normal",
+    "visual_status": "normal_untidy",
+    "source": "human_confirmed",
+    "description": "green_apple, pineapple, gatorade, hammer, screwdriver, tape, bolt이(가) 정상 구역에 배치된 사용자 확인 사례이며, 정돈 상태 비교용 정상 사례입니다.",
+    "reviewed_at": "2026-07-12",
+    "note": "사용자가 이 재검증 사례를 정상 배치 기준 이미지로 확인했습니다."
+  }
+}

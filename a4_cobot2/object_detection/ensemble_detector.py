@@ -14,6 +14,8 @@
 #   2. 수십~수백 줄짜리 FINAL 상세 로그 대신 한 줄 요약 로그를 기본 사용합니다.
 #   3. SAM2 실패로 제거된 detection도 개별 출력하지 않고 이유별 개수로 요약합니다.
 #   4. detailed_debug=True일 때만 개별 detection 상세 로그를 출력합니다.
+#   5. SAM2에 실제로 넣은 마지막 frame과 최종 detection을 캐시해,
+#      detection.py가 같은 결과로 annotated 이미지를 만들 수 있게 합니다.
 #
 # 주의:
 #   - ROS2 topic/service/action은 변경하지 않습니다.
@@ -44,8 +46,16 @@ class EnsembleDetector:
         self.rtdetr = RTDETRModel()
         self.sam2 = SAM2Refiner()
 
-        # detection.py의 preview는 기존처럼 YOLO 원본 모델을 사용합니다.
+        # 기존 코드 호환용 원본 YOLO model 참조입니다.
+        # 최종 annotated 이미지는 이 model을 다시 실행하지 않고,
+        # 아래 last_inference_frame / last_final_detections를 사용합니다.
         self.model = self.yolo.model
+
+        # 가장 최근 앙상블 추론 스냅샷입니다.
+        # frame은 SAM2 box prompt에 실제로 사용한 마지막 frame이며,
+        # detections는 YOLO+RT-DETR fusion과 SAM2 mask 보정까지 끝난 결과입니다.
+        self.last_inference_frame = None
+        self.last_final_detections: List[dict] = []
 
         self.frame_capture_sec = frame_capture_sec
         self.fuse_iou_threshold = fuse_iou_threshold
@@ -69,6 +79,8 @@ class EnsembleDetector:
         )
 
         if not frames:
+            self.last_inference_frame = None
+            self.last_final_detections = []
             print(
                 "[EnsembleDetector] no frames captured",
                 flush=True,
@@ -92,7 +104,7 @@ class EnsembleDetector:
 
         # 현재 구조에서는 마지막 frame에 fused bbox를 prompt로 넣습니다.
         # 카메라와 물체가 고정된 작업공간 스캔을 전제로 합니다.
-        frame_for_sam = frames[-1]
+        frame_for_sam = np.asarray(frames[-1]).copy()
 
         final_dets: List[dict] = []
         dropped_reasons = Counter()
@@ -160,7 +172,51 @@ class EnsembleDetector:
                 final_dets,
             )
 
+        self._store_last_result(
+            frame=frame_for_sam,
+            detections=final_dets,
+        )
+
         return final_dets
+
+    # SAM2에 사용한 frame과 최종 detection을 안전하게 복사해 보관합니다.
+    def _store_last_result(self, frame, detections: List[dict]):
+        self.last_inference_frame = (
+            np.asarray(frame).copy()
+            if frame is not None
+            else None
+        )
+
+        copied = []
+        for detection in detections:
+            item = dict(detection)
+            mask = item.get("mask")
+            if mask is not None:
+                item["mask"] = np.asarray(mask).copy()
+            box = item.get("box")
+            if box is not None:
+                item["box"] = [float(value) for value in box]
+            copied.append(item)
+
+        self.last_final_detections = copied
+
+    # detection.py가 동일한 frame/result 조합을 받아 그릴 수 있도록 snapshot을 반환합니다.
+    def get_last_result_snapshot(self):
+        frame = (
+            self.last_inference_frame.copy()
+            if self.last_inference_frame is not None
+            else None
+        )
+
+        detections = []
+        for detection in self.last_final_detections:
+            item = dict(detection)
+            mask = item.get("mask")
+            if mask is not None:
+                item["mask"] = np.asarray(mask).copy()
+            detections.append(item)
+
+        return frame, detections
 
     # 기본 로그: detection별 출력 대신 클래스/출처/mask/SAM 상태를 한 줄로 요약합니다.
     def _print_detection_summary(

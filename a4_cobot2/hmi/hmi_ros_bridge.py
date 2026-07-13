@@ -122,15 +122,25 @@ class HmiRosNode(Node):
             workspace_judgement_qos,
         )
 
-        # object_detection_node -> HMI (YOLO 인식 화면)
+        # object_detection_node -> HMI detection 화면.
+        # 최신 1장만 유지하고 오래된 image queue를 버려 화면 지연을 줄입니다.
+        detection_image_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
         self.detection_image_sub = self.create_subscription(
             Image,
             TOPIC_DETECTION_IMAGE,
             self.detection_image_callback,
-            10
+            detection_image_qos,
         )
 
-        self.get_logger().info("HMI ROS bridge node started.")
+        self.get_logger().info(
+            "HMI ROS bridge node started. "
+            "detection_image_qos=BEST_EFFORT/depth1"
+        )
         self.bridge.log_signal.emit("HMI ROS bridge node started")
 
     def publish_task_command(self, command: str):

@@ -96,8 +96,8 @@ class YoloModel:
         )
 
         # YOLO raw detection을 집계에 넣기 위한 confidence 기준입니다.
-        # 0.8은 실제 있는 물체를 통째로 놓쳐 "감지된 물체가 없습니다"로 빠질 수 있어 0.6으로 낮췄습니다.
-        # 순간 오검출은 아래 min_frame_support 반복 감지 필터가 걸러줍니다.
+        # 0.8은 실제 있는 물체를 놓칠 수 있어 0.6으로 낮췄습니다.
+        # 순간 오검출은 min_frame_support 기반 반복 감지 필터로 제거합니다.
         self.confidence_threshold = float(
             confidence_threshold
         )
@@ -120,7 +120,7 @@ class YoloModel:
         frames = {}
 
         while time.time() < end_time:
-            rclpy.spin_once(img_node)
+            img_node.spin_once(timeout_sec=0.01)
             frame = img_node.get_color_frame()
             stamp = img_node.get_color_frame_stamp()
 
@@ -148,7 +148,7 @@ class YoloModel:
         img_node,
         target,
     ):
-        rclpy.spin_once(img_node)
+        img_node.spin_once(timeout_sec=0.01)
         frames = self.get_frames(img_node)
 
         if not frames:
@@ -315,7 +315,7 @@ class YoloModel:
         img_node,
         target_names=None,
     ):
-        rclpy.spin_once(img_node)
+        img_node.spin_once(timeout_sec=0.01)
         frames = self.get_frames(img_node)
 
         return self.get_all_detections_from_frames(

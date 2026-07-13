@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "case_id": "recheck_20260712_162836",
+  "created_at": "2026-07-12T16:28:36",
+  "images": {
+    "raw": [
+      "recheck_20260712_162836_pose_1_of_3_raw.jpg",
+      "recheck_20260712_162836_pose_2_of_3_raw.jpg",
+      "recheck_20260712_162836_pose_3_of_3_raw.jpg"
+    ],
+    "annotated": [
+      "recheck_20260712_162836_pose_1_of_3_annotated.jpg",
+      "recheck_20260712_162836_pose_2_of_3_annotated.jpg",
+      "recheck_20260712_162836_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  "official_judgement": {
+    "task": "judge_workspace",
+    "frame": "base",
+    "result": "misplaced_found",
+    "normal_objects": [
+      {
+        "name": "tape",
+        "class_id": 7,
+        "confidence": 0.8953920602798462,
+        "box": [
+          450.2839050292969,
+          33.080787658691406,
+          552.503173828125,
+          139.38427734375
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 541.6240468726934,
+          "y": -45.42767813772288,
+          "z": 41.08636422843641
+        },
+        "angle": 37.3618337147941,
+        "width": 40.06873527039032,
+        "length": 43.1847507860096,
+        "current_zone": "blue",
+        "expected_zone": "blue",
+        "expected_zone_label": "blue"
+      }
+    ],
+    "misplaced_objects": [
+      {
+        "name": "bolt",
+        "class_id": 0,
+        "confidence": 0.8784055948257447,
+        "box": [
+          937.02490234375,
+          427.2503356933594,
+          994.1371459960938,
+          477.3993835449219
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 358.97474735983343,
+          "y": 167.20483739803723,
+          "z": 31.41569346394424
+        },
+        "pick_position": {
+          "x": 358.97474735983343,
+          "y": 167.20483739803723,
+          "z": 31.41569346394424
+        },
+        "angle": -38.19586433124093,
+        "width": 25.692536163348052,
+        "length": 29.45086704685748,
+        "current_zone": "green",
+        "expected_zone": "blue",
+        "expected_zone_label": "blue",
+        "place_position": {
+          "x": 622.702,
+          "y": -37.060500000000005,
+          "z": 14.0
+        },
+        "place_angle": 90.0,
+        "place_frame": "base",
+        "reason": "outside_expected_zone",
+        "place_cell": [
+          4,
+          0,
+          3,
+          3
+        ],
+        "place_failed": false
+      }
+    ],
+    "unknown_rule_objects": [],
+    "summary": {
+      "normal_count": 1,
+      "misplaced_count": 1,
+      "unknown_rule_count": 0,
+      "total_detected_count": 2
+    }
+  },
+  "detected_objects": [
+    {
+      "name": "tape",
+      "class_id": 7,
+      "confidence": 0.8953920602798462,
+      "box": [
+        450.2839050292969,
+        33.080787658691406,
+        552.503173828125,
+        139.38427734375
+      ],
+      "position": {
+        "x": 541.6240468726934,
+        "y": -45.42767813772288,
+        "z": 41.08636422843641
+      },
+      "angle": 37.3618337147941,
+      "width": 40.06873527039032,
+      "length": 43.1847507860096,
+      "major_axis_angle": 37.3618337147941,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "bolt",
+      "class_id": 0,
+      "confidence": 0.8784055948257447,
+      "box": [
+        937.02490234375,
+        427.2503356933594,
+        994.1371459960938,
+        477.3993835449219
+      ],
+      "position": {
+        "x": 358.97474735983343,
+        "y": 167.20483739803723,
+        "z": 31.41569346394424
+      },
+      "angle": -38.19586433124093,
+      "width": 25.692536163348052,
+      "length": 29.45086704685748,
+      "major_axis_angle": -38.19586433124093,
+      "detected_pose_count": 2
+    }
+  ],
+  "detected_objects_frame": "base",
+  "vlm_analysis": {
+    "source": "human_review_override",
+    "model": "gpt-4o",
+    "layout_status": "normal_untidy",
+    "description": "사과는 지정된 구역에 정상적으로 배치되어 있습니다. 망치는 손잡이가 red 영역과 blue 영역 사이의 경계선을 일부 침범하고 있어 사용자가 약간 옮겨 정리할 필요가 있습니다.",
+    "report_text": "사과는 정상 배치되어 있습니다. 망치는 손잡이가 구역 경계선에 걸쳐 있어 약간 옮겨 정리하는 것이 좋습니다.",
+    "confidence": 1.0
+  },
+  "retrieved_cases": [],
+  "vector_memory": {
+    "enabled": true,
+    "embedding_model": "openai/clip-vit-base-patch32",
+    "backend": "faiss_index_flat_ip",
+    "store_dir": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db",
+    "search_enabled": true,
+    "added_to_index": true,
+    "memory_error": null,
+    "index_status": "added",
+    "reference_scope": "normal_only",
+    "index_size": 3
+  },
+  "review_status": "approved",
+  "audit": {
+    "original_vlm_analysis_before_human_review": {
+      "source": "vlm",
+      "model": "gpt-4o",
+      "layout_status": "misplaced",
+      "description": "테이프는 파란 구역에 올바르게 배치되었으나, 볼트는 초록 구역에 있어 잘못된 배치입니다.",
+      "report_text": "작업 공간에 테이프는 올바른 위치에 있지만, 볼트가 잘못된 구역에 배치되어 있습니다. 추가 정리가 필요합니다.",
+      "confidence": 0.95
+    },
+    "previous_human_review_before_layout_note": {
+      "vlm_analysis": {
+        "source": "human_review_override",
+        "model": "gpt-4o",
+        "layout_status": "normal_clean",
+        "description": "tape, bolt이(가) 정상 구역에 배치된 사용자 확인 정상 사례입니다.",
+        "report_text": "정상 배치로 확인된 기준 사례입니다.",
+        "confidence": 1.0
+      },
+      "reference_label": {
+        "placement_status": "normal",
+        "visual_status": "normal_clean",
+        "source": "human_confirmed",
+        "description": "tape, bolt이(가) 정상 구역에 배치된 사용자 확인 정상 사례입니다.",
+        "reviewed_at": "2026-07-12",
+        "note": "사용자가 이 재검증 사례를 정상 배치 기준 이미지로 확인했습니다."
+      }
+    }
+  },
+  "reference_label": {
+    "placement_status": "normal",
+    "visual_status": "normal_untidy",
+    "source": "human_confirmed",
+    "description": "사과는 지정된 구역에 정상적으로 배치되어 있습니다. 망치는 손잡이가 red 영역과 blue 영역 사이의 경계선을 일부 침범하고 있어 사용자가 약간 옮겨 정리할 필요가 있습니다.",
+    "report_hint": "사과는 정상 배치되어 있습니다. 망치는 손잡이가 구역 경계선에 걸쳐 있어 약간 옮겨 정리하는 것이 좋습니다.",
+    "reviewed_at": "2026-07-12",
+    "note": "사과는 정상 배치이며, 망치는 red/blue 영역 경계선을 손잡이가 일부 침범해 사용자가 약간 이동시키는 것이 권장되는 정상 배치 사례입니다."
+  },
+  "human_review": {
+    "objects": [
+      {
+        "name": "green_apple",
+        "status": "normal",
+        "comment": "지정 구역에 정상적으로 배치되어 있습니다."
+      },
+      {
+        "name": "hammer",
+        "status": "minor_adjustment_recommended",
+        "comment": "손잡이가 red 영역과 blue 영역 사이의 경계선을 일부 침범하므로 약간 이동시키는 것이 좋습니다."
+      }
+    ],
+    "overall_status": "normal_untidy",
+    "requires_robot_rearrangement": false,
+    "requires_user_adjustment": true
+  }
+}

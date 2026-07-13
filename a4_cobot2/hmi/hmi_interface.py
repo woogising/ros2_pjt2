@@ -245,8 +245,8 @@ class SortingRobotHMI(QWidget):
         status_layout.setSpacing(12)
 
         self.status_cards["robot"] = StatusCard("ROBOT", "STANDBY", "#22C55E")
-        self.status_cards["camera"] = StatusCard("CAMERA", "WAITING", "#FACC15")
-        self.status_cards["yolo"] = StatusCard("YOLO", "WAITING", "#FACC15")
+        self.status_cards["camera"] = StatusCard("CAMERA", "STANDBY", "#22C55E")
+        self.status_cards["yolo"] = StatusCard("YOLO", "STANDBY", "#22C55E")
         self.status_cards["voice"] = StatusCard("VOICE", "READY", "#38BDF8")
         self.status_cards["task"] = StatusCard("TASK", "READY", "#A78BFA")
         self.status_cards["safety"] = StatusCard("SAFETY", "UNKNOWN", "#FACC15")
@@ -270,20 +270,16 @@ class SortingRobotHMI(QWidget):
         camera_layout.setContentsMargins(16, 16, 16, 16)
         camera_layout.setSpacing(12)
 
-        camera_title = QLabel("Camera / YOLO View")
+        camera_title = QLabel("Camera / Detection View")
         camera_title.setObjectName("PanelTitle")
 
         self.camera_view = QLabel()
         self.camera_view.setObjectName("CameraView")
         self.camera_view.setAlignment(Qt.AlignCenter)
         self.camera_view.setText(
-            "CAMERA VIEW\n\n"
-            "현재는 UI 노드 연동 1차 버전입니다.\n\n"
-            "추후 연결 예정:\n"
-            "/camera/camera/color/image_raw\n"
-            "또는 YOLO result image topic\n\n"
-            "현재 HMI 연결:\n"
-            "/task_command, /task_status, /user_notice, /safety_state"
+            "DETECTION VIEW\n\n"
+            "STANDBY\n\n"
+            "/yolo_detection_image 수신 대기 중"
         )
         self.camera_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -482,16 +478,19 @@ class SortingRobotHMI(QWidget):
 
         self.ros_bridge.start()
 
-    # object_detection_node의 YOLO 인식 이미지를 camera_view에 표시하는 슬롯
+    # object_detection_node의 최신 detection 이미지를 camera_view에 표시합니다.
+    # FastTransformation을 사용해 매 frame 고품질 보간으로 UI가 밀리는 현상을 줄입니다.
     def on_detection_image_received(self, qimage):
         pixmap = QPixmap.fromImage(qimage)
         self.camera_view.setPixmap(
             pixmap.scaled(
                 self.camera_view.size(),
                 Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
+                Qt.FastTransformation,
             )
         )
+        self.status_cards["camera"].set_status("ACTIVE", "#22C55E")
+        self.status_cards["yolo"].set_status("ACTIVE", "#22C55E")
 
     def add_log(self, text):
         self.log_box.append(f"> {text}")
@@ -569,8 +568,8 @@ class SortingRobotHMI(QWidget):
             "ROS2 reset 명령은 아직 연결하지 않았습니다."
         )
         self.status_cards["robot"].set_status("STANDBY", "#22C55E")
-        self.status_cards["camera"].set_status("WAITING", "#FACC15")
-        self.status_cards["yolo"].set_status("WAITING", "#FACC15")
+        self.status_cards["camera"].set_status("STANDBY", "#22C55E")
+        self.status_cards["yolo"].set_status("STANDBY", "#22C55E")
         self.status_cards["voice"].set_status("READY", "#38BDF8")
         self.status_cards["task"].set_status("READY", "#A78BFA")
         self.status_cards["safety"].set_status("UNKNOWN", "#FACC15")

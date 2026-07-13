@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "case_id": "recheck_20260712_173606",
+  "created_at": "2026-07-12T17:36:06",
+  "images": {
+    "raw": [
+      "recheck_20260712_173606_pose_1_of_3_raw.jpg",
+      "recheck_20260712_173606_pose_2_of_3_raw.jpg",
+      "recheck_20260712_173606_pose_3_of_3_raw.jpg"
+    ],
+    "annotated": [
+      "recheck_20260712_173606_pose_1_of_3_annotated.jpg",
+      "recheck_20260712_173606_pose_2_of_3_annotated.jpg",
+      "recheck_20260712_173606_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  "official_judgement": {
+    "task": "judge_workspace",
+    "frame": "base",
+    "result": "all_clear",
+    "normal_objects": [
+      {
+        "name": "green_apple",
+        "class_id": 2,
+        "confidence": 0.9634593725204468,
+        "box": [
+          708.3853149414062,
+          547.6705932617188,
+          874.81591796875,
+          715.5276489257812
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 455.51644002430635,
+          "y": 65.20653271630127,
+          "z": 76.457022525117
+        },
+        "angle": -33.63482452432851,
+        "width": 66.67000722934951,
+        "length": 70.35055170642615,
+        "current_zone": "green",
+        "expected_zone": "green",
+        "expected_zone_label": "green"
+      },
+      {
+        "name": "hammer",
+        "class_id": 3,
+        "confidence": 0.9430960536003112,
+        "box": [
+          575.1631469726562,
+          46.02001953125,
+          975.16015625,
+          202.76963806152344
+        ],
+        "center": null,
+        "depth": null,
+        "position": {
+          "x": 557.610418469958,
+          "y": 101.04833960827084,
+          "z": 39.40199015001166
+        },
+        "angle": -89.3392453668029,
+        "width": 62.64827591463097,
+        "length": 177.49653351073397,
+        "current_zone": "red",
+        "expected_zone": "red",
+        "expected_zone_label": "red"
+      }
+    ],
+    "misplaced_objects": [],
+    "unknown_rule_objects": [],
+    "summary": {
+      "normal_count": 2,
+      "misplaced_count": 0,
+      "unknown_rule_count": 0,
+      "total_detected_count": 2
+    }
+  },
+  "reference_label": {
+    "placement_status": "normal",
+    "visual_status": "normal_clean",
+    "source": "official_judgement",
+    "description": "green_apple과 hammer가 각각 green과 red 구역에 정확히 배치되어 있으며, 전반적인 정돈 상태가 양호합니다."
+  },
+  "detected_objects": [
+    {
+      "name": "green_apple",
+      "class_id": 2,
+      "confidence": 0.9634593725204468,
+      "box": [
+        708.3853149414062,
+        547.6705932617188,
+        874.81591796875,
+        715.5276489257812
+      ],
+      "position": {
+        "x": 455.51644002430635,
+        "y": 65.20653271630127,
+        "z": 76.457022525117
+      },
+      "angle": -33.63482452432851,
+      "width": 66.67000722934951,
+      "length": 70.35055170642615,
+      "major_axis_angle": -33.63482452432851,
+      "detected_pose_count": 2
+    },
+    {
+      "name": "hammer",
+      "class_id": 3,
+      "confidence": 0.9430960536003112,
+      "box": [
+        575.1631469726562,
+        46.02001953125,
+        975.16015625,
+        202.76963806152344
+      ],
+      "position": {
+        "x": 557.610418469958,
+        "y": 101.04833960827084,
+        "z": 39.40199015001166
+      },
+      "angle": -89.3392453668029,
+      "width": 62.64827591463097,
+      "length": 177.49653351073397,
+      "major_axis_angle": -89.3392453668029,
+      "detected_pose_count": 2
+    }
+  ],
+  "detected_objects_frame": "base",
+  "vlm_analysis": {
+    "source": "vlm",
+    "model": "gpt-4o",
+    "layout_status": "normal_clean",
+    "description": "green_apple과 hammer가 각각 green과 red 구역에 정확히 배치되어 있으며, 전반적인 정돈 상태가 양호합니다.",
+    "report_text": "모든 물건이 지정된 구역에 올바르게 배치되었습니다. 작업공간은 깔끔하게 정리되어 있습니다.",
+    "confidence": 0.95
+  },
+  "retrieved_cases": [
+    {
+      "case_id": "recheck_20260712_163900",
+      "similarity": 0.966506,
+      "reference_status": "normal",
+      "reference_visual_status": "normal_clean",
+      "reference_source": "human_confirmed",
+      "description": "green_apple, pocari, screwdriver, tape, hammer이(가) 정상 구역에 배치된 사용자 확인 정상 사례입니다."
+    }
+  ],
+  "vector_memory": {
+    "enabled": true,
+    "embedding_model": "openai/clip-vit-base-patch32",
+    "backend": "faiss_index_flat_ip",
+    "store_dir": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db",
+    "search_enabled": true,
+    "added_to_index": true,
+    "memory_error": null,
+    "index_status": "added",
+    "index_size": 6
+  },
+  "review_status": "unreviewed"
+}

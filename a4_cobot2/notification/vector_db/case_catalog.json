@@ -1,0 +1,92 @@
+[
+  {
+    "case_id": "recheck_20260712_170608",
+    "embedding_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db/embeddings/recheck_20260712_170608.npy",
+    "metadata_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_metadata.json",
+    "raw_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_pose_1_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_pose_2_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_pose_3_of_3_raw.jpg"
+    ],
+    "annotated_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_pose_1_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_pose_2_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_170608_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  {
+    "case_id": "recheck_20260712_171114",
+    "embedding_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db/embeddings/recheck_20260712_171114.npy",
+    "metadata_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_metadata.json",
+    "raw_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_pose_1_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_pose_2_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_pose_3_of_3_raw.jpg"
+    ],
+    "annotated_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_pose_1_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_pose_2_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_171114_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  {
+    "case_id": "recheck_20260712_162836",
+    "embedding_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db/embeddings/recheck_20260712_162836.npy",
+    "metadata_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_metadata.json",
+    "raw_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_pose_1_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_pose_2_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_pose_3_of_3_raw.jpg"
+    ],
+    "annotated_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_pose_1_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_pose_2_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_162836_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  {
+    "case_id": "recheck_20260712_163900",
+    "embedding_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db/embeddings/recheck_20260712_163900.npy",
+    "metadata_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_metadata.json",
+    "raw_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_pose_1_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_pose_2_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_pose_3_of_3_raw.jpg"
+    ],
+    "annotated_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_pose_1_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_pose_2_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_163900_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  {
+    "case_id": "recheck_20260712_165058",
+    "embedding_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db/embeddings/recheck_20260712_165058.npy",
+    "metadata_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_metadata.json",
+    "raw_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_pose_1_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_pose_2_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_pose_3_of_3_raw.jpg"
+    ],
+    "annotated_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_pose_1_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_pose_2_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_165058_pose_3_of_3_annotated.jpg"
+    ]
+  },
+  {
+    "case_id": "recheck_20260712_173606",
+    "embedding_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/vector_db/embeddings/recheck_20260712_173606.npy",
+    "metadata_path": "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_metadata.json",
+    "raw_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_pose_1_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_pose_2_of_3_raw.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_pose_3_of_3_raw.jpg"
+    ],
+    "annotated_image_paths": [
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_pose_1_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_pose_2_of_3_annotated.jpg",
+      "/home/rokey/a4_cobot2_ws/src/a4_cobot2/notification/scan_images/recheck_20260712_173606_pose_3_of_3_annotated.jpg"
+    ]
+  }
+]
