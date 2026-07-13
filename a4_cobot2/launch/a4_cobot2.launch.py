@@ -49,7 +49,7 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'db_path': '~/a4_cobot2_ws/a4_cobot2_log/cobot2_log.db',
-                    'enable_rosbag': True,
+                    'enable_rosbag': False,
                     'bag_path': '~/a4_cobot2_ws/a4_cobot2_log/bags',
                     'bag_storage_id': 'sqlite3',
                     'bag_startup_wait_sec': 0.7,
