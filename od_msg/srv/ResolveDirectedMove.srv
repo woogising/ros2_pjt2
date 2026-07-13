@@ -1,0 +1,10 @@
+string command
+string detected_objects_json
+---
+bool success
+int32 target_id
+string place_zone
+float32 confidence
+bool need_confirmation
+string reason
+string message

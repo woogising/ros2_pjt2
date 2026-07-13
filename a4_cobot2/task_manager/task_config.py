@@ -37,6 +37,10 @@ TOPIC_WORKSPACE_JUDGEMENT = '/workspace_judgement'
 # ObjectDetectionNode에게 이번 3자세 스캔이 최초 확인인지 재검증인지 알려주는 topic
 TOPIC_WORKSPACE_SCAN_MODE = '/workspace_scan_mode'
 
+# 지정 이동(directed move) 테스트 진입점 topic
+# 원문 명령 문장을 std_msgs/String으로 받아 지정 이동 흐름을 시작합니다.
+TOPIC_DIRECTED_MOVE_COMMAND = '/directed_move_command'
+
 # Service 이름
 SERVICE_GET_3D_POSITION = 'get_3d_position' # get_3d_position은 디버깅용 또는 pick 직전 재확인용으로 남겨둘 수 있음
 SERVICE_SCAN_WORKSPACE = 'scan_workspace' # 작업공간 전체를 한 번에 스캔하는 ObjectDetectionNode 서비스
@@ -57,6 +61,9 @@ TOPIC_EMERGENCY_STOP = '/emergency_stop'
 # =============================== VLM ===============================
 # VLMReportNode가 최종 사용자 보고문을 생성하는 service
 SERVICE_GENERATE_FINAL_REPORT = '/generate_final_report'
+
+# DirectedMoveVLMNode가 지정 이동 명령을 target_id/place_zone으로 해석하는 service
+SERVICE_RESOLVE_DIRECTED_MOVE = '/resolve_directed_move'
 
 # OpenAI API 호출은 일반 ROS service보다 시간이 걸릴 수 있으므로 별도 timeout을 둡니다.
 # VLM_REPORT_WAIT_TIMEOUT_SEC는 service server가 있는지 확인하는 timeout입니다.

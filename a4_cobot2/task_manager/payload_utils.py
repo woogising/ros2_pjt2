@@ -15,11 +15,13 @@ from task_manager import status_codes as Status
 from task_manager.task_config import DETECTION_FRAME
 
 
-# 현재 작업명이 작업공간 감지 흐름인지 판단합니다.
+# 현재 작업명이 작업공간 감지(3자세 스캔) 흐름인지 판단합니다.
+# 지정 이동도 좌표 확보를 위해 같은 스캔을 재사용하므로 여기에 포함합니다.
 def is_workspace_detection_task(task_name: str) -> bool:
     return task_name in [
         Status.TASK_CHECK_WORKSPACE,
         Status.TASK_RECHECK_WORKSPACE,
+        Status.TASK_DIRECTED_MOVE,
     ]
 
 # scan_workspace 서비스에 보낼 target_names_json 문자열을 만듭니다.

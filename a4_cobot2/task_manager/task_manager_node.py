@@ -21,7 +21,7 @@ from rclpy.action import ActionClient
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-from od_msg.srv import SrvDepthPosition, JudgeWorkspace, ScanWorkspace, GenerateReport
+from od_msg.srv import SrvDepthPosition, JudgeWorkspace, ScanWorkspace, GenerateReport, ResolveDirectedMove
 from od_msg.action import OrganizeObjects
 
 from task_manager import status_codes as Status
@@ -32,9 +32,11 @@ from task_manager.task_config import (
     SERVICE_SCAN_WORKSPACE,
     SERVICE_JUDGE_WORKSPACE,
     SERVICE_GENERATE_FINAL_REPORT,
+    SERVICE_RESOLVE_DIRECTED_MOVE,
     SERVICE_WAIT_TIMEOUT_SEC,
     VLM_REPORT_WAIT_TIMEOUT_SEC,
     TARGET_OBJECTS,
+    TOPIC_DIRECTED_MOVE_COMMAND,
     TOPIC_SAFETY_COMMAND,
     TOPIC_TASK_COMMAND,
     TOPIC_TASK_STATUS,
@@ -55,6 +57,7 @@ from notification.notice_utils import (
     make_recheck_remaining_notice,
     make_workspace_judgement_notice,
 )
+from workspace.workspace_judge_utils import get_default_zone_rules
 from safety.safety_constants import (
     SAFETY_COMMAND_CLEAR,
     SAFETY_COMMAND_STOP,
@@ -67,6 +70,12 @@ class TaskManagerNode(Node):
         super().__init__('task_manager_node')
 
         self.task_command_sub = self.create_subscription(String, TOPIC_TASK_COMMAND, self.task_command_callback, 10)
+
+        # 지정 이동(directed move) 테스트 진입점입니다.
+        # 원문 명령 문장을 받아 스캔 → VLM 해석 → 단일 물체 정리 흐름을 시작합니다.
+        self.directed_move_command_sub = self.create_subscription(
+            String, TOPIC_DIRECTED_MOVE_COMMAND, self.directed_move_command_callback, 10
+        )
 
         self.task_status_pub = self.create_publisher(String, TOPIC_TASK_STATUS, 10)
 
@@ -93,6 +102,10 @@ class TaskManagerNode(Node):
         # VLMReportNode의 /generate_final_report 서비스를 호출하기 위한 client입니다.
         # 정리 후 재검증 결과를 사용자에게 자연어로 최종 보고할 때 사용합니다.
         self.generate_final_report_client = self.create_client(GenerateReport, SERVICE_GENERATE_FINAL_REPORT)
+
+        # DirectedMoveVLMNode의 /resolve_directed_move 서비스를 호출하기 위한 client입니다.
+        # 지정 이동 명령을 target_id/place_zone으로 해석할 때 사용합니다.
+        self.resolve_directed_move_client = self.create_client(ResolveDirectedMove, SERVICE_RESOLVE_DIRECTED_MOVE)
 
         # RobotArmNode의 /organize_objects action server에 정리 대상 목록을 보냅니다.
         # service가 아니라 action인 이유: 여러 물체를 순서대로 정리하면서 feedback/cancel/result가 필요하기 때문입니다.
@@ -168,6 +181,10 @@ class TaskManagerNode(Node):
         #   가장 최근의 workspace 판단 결과를 저장
         #   start_organize 명령이 들어오면 여기서 misplaced_objects를 꺼내 robot_arm_node에 보냄
         self.latest_workspace_judgement = None
+
+        # pending_directed_move_command
+        #   지정 이동 흐름에서 스캔이 끝난 뒤 VLM에 넘길 원문 명령 문장
+        self.pending_directed_move_command = None
 
         # current_robot_goal_handl
         #   robot_arm_node에 보낸 organize action goal handle
@@ -269,6 +286,25 @@ class TaskManagerNode(Node):
         self.is_busy = True
         self.start_workspace_detection(Status.TASK_RECHECK_WORKSPACE)
 
+    # 지정 이동 명령(원문 문장)을 받아 스캔 → VLM 해석 흐름을 시작하는 함수
+    def directed_move_command_callback(self, msg: String):
+        command = msg.data.strip()
+
+        self.get_logger().info(f'Received directed move command: {command}')
+
+        if command == '':
+            self.get_logger().warn('빈 지정 이동 명령이라 무시합니다.')
+            return
+
+        if self.is_busy:
+            self.get_logger().warn('현재 다른 작업을 처리 중입니다.')
+            self.publish_status(Status.BUSY)
+            return
+
+        self.is_busy = True
+        self.pending_directed_move_command = command
+        self.start_workspace_detection(Status.TASK_DIRECTED_MOVE)
+
     # 작업공간 확인 또는 재검증을 시작하기 위해 공통 상태를 초기화하고 첫 위치 요청을 보내는 함수
     def start_workspace_detection(self, task_name: str):
         self.current_task = task_name
@@ -280,7 +316,12 @@ class TaskManagerNode(Node):
 
         # 이번 3자세 스캔이 최초 확인인지 재검증인지 ObjectDetectionNode에 알려줍니다.
         # check_workspace에서는 이미지를 저장하지 않고, recheck_workspace에서만 최종 보고용 이미지를 저장합니다.
-        self.publish_workspace_scan_mode(task_name)
+        # 지정 이동은 이미지 저장이 필요 없으므로 check_workspace 모드로 스캔합니다.
+        # (ObjectDetectionNode는 check_workspace / recheck_workspace 외의 모드를 거부합니다.)
+        if task_name == Status.TASK_RECHECK_WORKSPACE:
+            self.publish_workspace_scan_mode(Status.TASK_RECHECK_WORKSPACE)
+        else:
+            self.publish_workspace_scan_mode(Status.TASK_CHECK_WORKSPACE)
 
         if task_name == Status.TASK_CHECK_WORKSPACE:
             self.latest_workspace_judgement = None
@@ -291,12 +332,16 @@ class TaskManagerNode(Node):
             self.publish_status(Status.RECHECK_WORKSPACE_REQUESTED)
             self.publish_user_notice('정리 결과를 확인하기 위해 작업공간을 다시 검사합니다.')
 
+        elif task_name == Status.TASK_DIRECTED_MOVE:
+            self.publish_status(Status.DIRECTED_MOVE_REQUESTED)
+            self.publish_user_notice('지정 이동 명령을 받았습니다. 작업공간을 확인합니다.')
+
         self.publish_safety_command(SAFETY_COMMAND_CLEAR)
 
-        if task_name == Status.TASK_CHECK_WORKSPACE:
-            self.publish_status(Status.CHECKING_WORKSPACE)
-        else:
+        if task_name == Status.TASK_RECHECK_WORKSPACE:
             self.publish_status(Status.RECHECKING_WORKSPACE)
+        else:
+            self.publish_status(Status.CHECKING_WORKSPACE)
 
         self.request_scan_workspace()
 
@@ -442,6 +487,12 @@ class TaskManagerNode(Node):
             return
 
         self.publish_status(Status.WORKSPACE_DETECTION_FINISHED)
+
+        # 지정 이동은 판단(judge) 대신 VLM 해석 단계로 넘어갑니다.
+        if self.current_task == Status.TASK_DIRECTED_MOVE:
+            self.request_resolve_directed_move()
+            return
+
         self.request_workspace_judgement()
 
     # 감지된 물체 목록을 /judge_workspace 서비스 요청 JSON으로 만들어 workspace_judge_node에 보내는 함수
@@ -526,6 +577,97 @@ class TaskManagerNode(Node):
         finally:
             self.finish_current_task()
 
+    # 3자세 스캔으로 얻은 물체 목록과 원문 명령을 DirectedMoveVLMNode에 보내 해석을 요청하는 함수
+    def request_resolve_directed_move(self):
+        if self.stop_requested:
+            self.get_logger().warn('stop 요청으로 지정 이동 해석을 중단합니다.')
+            self.finish_current_task()
+            return
+
+        if not self.resolve_directed_move_client.wait_for_service(timeout_sec=VLM_REPORT_WAIT_TIMEOUT_SEC):
+            self.get_logger().error('/resolve_directed_move 서비스를 찾을 수 없습니다.')
+            self.publish_status(Status.DIRECTED_MOVE_SERVICE_UNAVAILABLE)
+            self.publish_user_notice('VLM 노드를 찾을 수 없어 지정 이동을 수행할 수 없습니다.')
+            self.finish_current_task()
+            return
+
+        self.publish_status(Status.DIRECTED_MOVE_RESOLVING)
+
+        request = ResolveDirectedMove.Request()
+        request.command = self.pending_directed_move_command or ''
+        request.detected_objects_json = json.dumps(
+            {
+                'objects': self.detected_objects,
+                'frame': self.detected_objects_frame or 'base',
+            },
+            ensure_ascii=False,
+        )
+
+        self.get_logger().info(f'DirectedMoveVLMNode에 지정 이동 해석을 요청합니다: {request.command}')
+
+        future = self.resolve_directed_move_client.call_async(request)
+        future.add_done_callback(self.resolve_directed_move_response_callback)
+
+    # DirectedMoveVLMNode의 해석 응답을 받아 단일 물체 정리 goal을 조립해 로봇에 보내는 함수
+    def resolve_directed_move_response_callback(self, future):
+        if self.stop_requested:
+            self.get_logger().warn('stop 요청으로 지정 이동 해석 응답 처리를 중단합니다.')
+            return
+
+        try:
+            response = future.result()
+        except Exception as e:
+            self.get_logger().error(f'지정 이동 해석 응답 처리 중 오류: {e}')
+            self.publish_status(Status.DIRECTED_MOVE_UNRESOLVED)
+            self.publish_user_notice('지정 이동 명령 해석 중 오류가 발생했습니다.')
+            self.finish_current_task()
+            return
+
+        if not response.success:
+            self.get_logger().warn(f'지정 이동 해석 실패: {response.message}')
+            self.publish_status(Status.DIRECTED_MOVE_UNRESOLVED)
+            self.publish_user_notice(response.reason or '요청하신 물체나 구역을 이해하지 못했습니다.')
+            self.finish_current_task()
+            return
+
+        target_id = response.target_id
+        place_zone = response.place_zone
+
+        if target_id < 0 or target_id >= len(self.detected_objects):
+            self.get_logger().warn(f'target_id가 범위를 벗어났습니다: {target_id}')
+            self.publish_status(Status.DIRECTED_MOVE_UNRESOLVED)
+            self.publish_user_notice('말씀하신 물체를 작업공간에서 찾지 못했습니다.')
+            self.finish_current_task()
+            return
+
+        zone = get_default_zone_rules().get('zones', {}).get(place_zone)
+        if zone is None:
+            self.get_logger().warn(f'유효하지 않은 place_zone입니다: {place_zone}')
+            self.publish_status(Status.DIRECTED_MOVE_UNRESOLVED)
+            self.publish_user_notice('옮길 구역을 이해하지 못했습니다.')
+            self.finish_current_task()
+            return
+
+        target = self.detected_objects[target_id]
+
+        move_object = {
+            'name': target.get('name', 'unknown_object'),
+            'pick_position': target.get('position'),
+            'place_position': zone['place_position'],
+            'place_frame': 'base',
+            'expected_zone': place_zone,
+            'angle': target.get('angle'),
+            'width': target.get('width'),
+            'place_angle': None,
+        }
+
+        self.get_logger().info(
+            f'지정 이동 대상 결정: {move_object["name"]} → {place_zone} '
+            f'(confidence={response.confidence:.2f})'
+        )
+
+        self.request_robot_organize([move_object])
+
     # 오배치 물체 목록을 robot_arm_node의 /organize_objects action goal로 보내는 함수
     def request_robot_organize(self, misplaced_objects):
         if not self.organize_objects_action_client.wait_for_server(timeout_sec=ACTION_WAIT_TIMEOUT_SEC):
@@ -593,11 +735,16 @@ class TaskManagerNode(Node):
 
             if result.success:
                 self.publish_status(Status.ROBOT_ORGANIZE_FINISHED)
-                self.publish_user_notice('로봇 정리 작업이 완료되었습니다. 작업공간을 다시 확인합니다.')
-
                 self.current_robot_goal_handle = None
-                should_finish_task = False
-                self.handle_recheck_workspace()
+
+                if self.current_task == Status.TASK_DIRECTED_MOVE:
+                    # 지정 이동은 단일 물체 이동이므로 재검증 없이 종료합니다.
+                    self.publish_status(Status.DIRECTED_MOVE_FINISHED)
+                    self.publish_user_notice('요청하신 물체를 옮겼습니다.')
+                else:
+                    self.publish_user_notice('로봇 정리 작업이 완료되었습니다. 작업공간을 다시 확인합니다.')
+                    should_finish_task = False
+                    self.handle_recheck_workspace()
 
             else:
                 self.publish_status(Status.ROBOT_ORGANIZE_FAILED)

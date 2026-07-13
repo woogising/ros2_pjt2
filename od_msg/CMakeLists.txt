@@ -11,6 +11,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ScanWorkspace.srv"
   "srv/JudgeWorkspace.srv"
   "srv/GenerateReport.srv"
+  "srv/ResolveDirectedMove.srv"
   "action/OrganizeObjects.action"
 )
 

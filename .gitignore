@@ -26,4 +26,6 @@ Thumbs.db
 .env
 *.env
 cobot.md
+docs/
+code_review.md
 

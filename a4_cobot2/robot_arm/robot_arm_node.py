@@ -294,12 +294,7 @@ class RobotArmNode(Node):
 
     # 오배치 물체 하나를 집어서 원래 있어야 하는 구역 대표 위치로 옮기는 함수
     def organize_single_object(self, misplaced_object):
-        # misplaced_object는 workspace_judge_utils.make_misplaced_object()가 만든 dict입니다.
-        # name: 물체 클래스 이름
-        # pick_position: 현재 물체 위치. 현재는 camera frame 기준입니다.
-        # place_position: 원래 있어야 하는 zone의 대표 위치. 현재는 camera frame 기준입니다.
-        # place_frame: 위 좌표들이 어떤 frame 기준인지 나타냅니다.
-        # expected_zone: 물체가 이동해야 하는 zone 이름입니다.
+
         object_name = misplaced_object.get('name', 'unknown_object')
         pick_position = misplaced_object.get('pick_position')
         place_position = misplaced_object.get('place_position')

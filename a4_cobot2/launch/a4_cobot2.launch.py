@@ -113,4 +113,40 @@ def generate_launch_description():
         )
     )
 
+    # 지정 이동(directed move) VLM 노드.
+    # TaskManagerNode가 /resolve_directed_move service를 호출해
+    # "어느 물체를 어느 구역으로" 옮길지 해석한다.
+    nodes.append(
+        Node(
+            package=package,
+            executable='directed_move_vlm_node',
+            name='directed_move_vlm_node',
+            output='screen',
+            emulate_tty=True,
+            parameters=[
+                {
+                    # True: OpenAI GPT-4o로 지정 이동 명령 해석
+                    # False: 해석 불가(지정 이동 사용 안 함)
+                    'use_vlm': True,
+
+                    # OpenAI vision-capable model
+                    'model': 'gpt-4o',
+
+                    # 현재 작업공간 원본 이미지 topic
+                    'image_topic': '/camera/camera/color/image_raw',
+
+                    # OpenAI로 보낼 이미지 크기/품질 제한
+                    'max_image_width': 960,
+                    'jpeg_quality': 80,
+
+                    # OpenAI API 응답 대기 시간
+                    'openai_timeout_sec': 15.0,
+
+                    # 이 확신도 미만이면 안전하게 이동을 중단한다.
+                    'confidence_threshold': 0.4,
+                }
+            ],
+        )
+    )
+
     return LaunchDescription(nodes)

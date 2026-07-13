@@ -19,6 +19,7 @@ COMMAND_SHUTDOWN = 'shutdown'
 TASK_CHECK_WORKSPACE = 'check_workspace'
 TASK_RECHECK_WORKSPACE = 'recheck_workspace'
 TASK_START_ORGANIZE = 'start_organize'
+TASK_DIRECTED_MOVE = 'directed_move'
 
 # TaskManagerNode가 준비되었음을 나타내는 상태입니다.
 TASK_MANAGER_READY = 'task_manager_ready'
@@ -66,6 +67,13 @@ ROBOT_ORGANIZE_CANCEL_REQUESTED = 'robot_organize_cancel_requested'
 ROBOT_ORGANIZE_CANCEL_ACCEPTED = 'robot_organize_cancel_accepted'
 ROBOT_ORGANIZE_CANCEL_REJECTED = 'robot_organize_cancel_rejected'
 ROBOT_ORGANIZE_CANCEL_ERROR = 'robot_organize_cancel_error'
+
+# 지정 이동(directed move) 흐름 상태입니다.
+DIRECTED_MOVE_REQUESTED = 'directed_move_requested'
+DIRECTED_MOVE_RESOLVING = 'directed_move_resolving'
+DIRECTED_MOVE_UNRESOLVED = 'directed_move_unresolved'
+DIRECTED_MOVE_SERVICE_UNAVAILABLE = 'directed_move_service_unavailable'
+DIRECTED_MOVE_FINISHED = 'directed_move_finished'
 
 # 정지/종료/공통 상태입니다.
 STOP_REQUESTED = 'stop_requested'
