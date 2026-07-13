@@ -58,7 +58,7 @@ from notification.notice_utils import (
     make_workspace_judgement_notice,
 )
 from workspace.workspace_judge_utils import get_default_zone_rules
-from safety.safety_constants import (
+from task_manager.safety.safety_constants import (
     SAFETY_COMMAND_CLEAR,
     SAFETY_COMMAND_STOP,
 )

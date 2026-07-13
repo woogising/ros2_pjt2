@@ -13,7 +13,7 @@ from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy, DurabilityPo
 
 from std_msgs.msg import Bool
 from std_msgs.msg import String
-from safety.safety_constants import (
+from task_manager.safety.safety_constants import (
     SAFETY_COMMAND_CLEAR,
     SAFETY_COMMAND_STOP,
     SAFETY_STATE_NORMAL,

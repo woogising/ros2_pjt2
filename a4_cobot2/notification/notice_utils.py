@@ -11,8 +11,8 @@
 import re
 
 from collections import Counter
-from safety.safety_constants import SAFETY_STATE_NORMAL
-from safety.safety_constants import SAFETY_STATE_EMERGENCY_STOP
+from task_manager.safety.safety_constants import SAFETY_STATE_NORMAL
+from task_manager.safety.safety_constants import SAFETY_STATE_EMERGENCY_STOP
 
 
 TASK_STATUS_NOTICE_MAP = {

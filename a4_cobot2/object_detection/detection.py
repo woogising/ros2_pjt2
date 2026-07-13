@@ -79,7 +79,7 @@ SAVE_SCAN_CLOUD_PLY = True
 
 class ObjectDetectionNode(Node):
     # ObjectDetectionNode를 초기화하고 카메라 구독 노드, detector, ROS 통신 인터페이스를 준비한다.
-    def __init__(self, model_name="ensemble"):
+    def __init__(self, model_name="yolo"):
         super().__init__("object_detection_node")
 
         # ImgNode는 RealSense topic을 구독해서 최신 RGB/depth/camera_info를 보관합니다.
