@@ -277,7 +277,7 @@ def pick_and_place_object(object_name, pick_position, place_position, object_ang
 
     if object_angle is not None:
 
-        rot = object_angle #- 90 if object_angle >= 0 else object_angle + 90
+        rot = object_angle - 90 if object_angle >= 0 else object_angle + 90
         # 실기 보정: 그리퍼가 물체 각도와 어긋나면 GRIPPER_ANGLE_OFFSET_DEG로 맞춘다.
         # 방향(부호)이 반대로 돌면 아래 += 를 -= 로 바꾼다.
         rot += GRIPPER_ANGLE_OFFSET_DEG
